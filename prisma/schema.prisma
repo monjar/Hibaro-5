@@ -1,0 +1,474 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== ENUMS ====================
+
+enum CharacterType {
+  PLAYER
+  NPC
+}
+
+enum PlanetType {
+  TERRESTRIAL
+  GAS_GIANT
+  ICE
+  DESERT
+  OCEAN
+  ASTEROID_BELT
+  STATION
+}
+
+enum BuildingOwnerType {
+  CHARACTER
+  FACTION
+  CORPORATION
+  SYSTEM
+}
+
+enum BuildingStatus {
+  OPEN
+  CLOSED
+  DAMAGED
+  ABANDONED
+  LOCKED_DOWN
+}
+
+enum BuildingFunction {
+  SHOP
+  SAFEHOUSE
+  OFFICE
+  HUB
+  DOCK
+  BAR
+  CLINIC
+  WAREHOUSE
+  BLACK_MARKET
+  MISSION_BOARD
+}
+
+enum FactionMembershipStatus {
+  ACTIVE
+  EXILED
+  BETRAYER
+  HONOURED
+}
+
+enum CorporationIndustry {
+  MINING
+  WEAPONS
+  TRANSPORT
+  CYBERNETICS
+  FOOD
+  SECURITY
+  MEDIA
+  ENERGY
+  MEDICAL
+  LOGISTICS
+  BLACK_MARKET
+}
+
+enum CorporationStatus {
+  GROWING
+  STABLE
+  DECLINING
+  BANKRUPT
+}
+
+enum ItemCategory {
+  TOOL
+  WEAPON
+  CLOTHING
+  VEHICLE
+  CONSUMABLE
+  MATERIAL
+  QUEST_ITEM
+}
+
+enum ItemRarity {
+  COMMON
+  UNCOMMON
+  RARE
+  EPIC
+  LEGENDARY
+  ILLEGAL
+}
+
+enum ItemOwnerType {
+  CHARACTER
+  FACTION
+  CORPORATION
+  BUILDING
+}
+
+enum OpportunityKind {
+  GIG
+  JOB
+  QUEST
+}
+
+enum OpportunityType {
+  DELIVERY
+  BOUNTY
+  ESCORT
+  HACKING
+  SMUGGLING
+  ASSASSINATION
+  INVESTIGATION
+  MINING
+  TRADING
+  DIPLOMACY
+  SECURITY
+  REPAIR
+  STORY
+  WORLD
+}
+
+enum OpportunityPostedByType {
+  CHARACTER
+  FACTION
+  CORPORATION
+  SYSTEM
+}
+
+enum OpportunityInstanceStatus {
+  AVAILABLE
+  ACCEPTED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum WorldEventScope {
+  CHARACTER
+  BUILDING
+  DISTRICT
+  PLANET
+  FACTION
+  CORPORATION
+  WORLD
+}
+
+enum WorldEventStatus {
+  SCHEDULED
+  ACTIVE
+  RESOLVED
+  CANCELLED
+}
+
+enum RelationshipType {
+  REPUTATION
+  LOYALTY
+  HOSTILITY
+  TRUST
+  EMPLOYMENT
+  ALLIANCE
+  RIVALRY
+  INFLUENCE
+  SPONSORSHIP
+}
+
+enum ActivityType {
+  LOGIN
+  LOGOUT
+  GIG_ACCEPTED
+  GIG_COMPLETED
+  GIG_FAILED
+  JOB_COMPLETED
+  QUEST_STARTED
+  QUEST_COMPLETED
+  ITEM_BOUGHT
+  ITEM_SOLD
+  FACTION_JOINED
+  BUILDING_ENTERED
+  COMBAT_EVENT
+  WORLD_EVENT_TRIGGERED
+  RELATIONSHIP_CHANGED
+  LOCATION_CHANGED
+}
+
+// ==================== MODELS ====================
+
+model Player {
+  id          String   @id @default(uuid())
+  username    String   @unique
+  email       String?  @unique
+  createdAt   DateTime @default(now())
+  lastLoginAt DateTime @default(now())
+
+  character    Character?
+  activityLogs ActivityLog[]
+}
+
+model Character {
+  id                String        @id @default(uuid())
+  name              String
+  type              CharacterType @default(PLAYER)
+  playerId          String?       @unique
+  player            Player?       @relation(fields: [playerId], references: [id])
+  currentPlanetId   String?
+  currentPlanet     Planet?       @relation(fields: [currentPlanetId], references: [id])
+  currentDistrictId String?
+  currentDistrict   District?     @relation(fields: [currentDistrictId], references: [id])
+  currentBuildingId String?
+  currentBuilding   Building?     @relation(fields: [currentBuildingId], references: [id])
+  credits           Float         @default(0)
+  health            Int           @default(100)
+  maxHealth         Int           @default(100)
+  energy            Int           @default(100)
+  maxEnergy         Int           @default(100)
+  wantedLevel       Int           @default(0)
+  strength          Int           @default(5)
+  agility           Int           @default(5)
+  intelligence      Int           @default(5)
+  charisma          Int           @default(5)
+  hacking           Int           @default(5)
+  combat            Int           @default(5)
+  stealth           Int           @default(5)
+  engineering       Int           @default(5)
+  reputation        Int           @default(0)
+  createdAt         DateTime      @default(now())
+
+  factionMemberships     FactionMembership[]
+  corporationEmployments CorporationEmployment[]
+  itemInstances          ItemInstance[]
+  opportunityInstances   OpportunityInstance[]
+  activityLogs           ActivityLog[]
+}
+
+model SolarSystem {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+
+  planets Planet[]
+}
+
+model Planet {
+  id            String      @id @default(uuid())
+  solarSystemId String
+  solarSystem   SolarSystem @relation(fields: [solarSystemId], references: [id])
+  name          String      @unique
+  description   String?
+  planetType    PlanetType  @default(TERRESTRIAL)
+  dangerLevel   Int         @default(1)
+  lawLevel      Int         @default(5)
+  economyLevel  Int         @default(5)
+
+  districts  District[]
+  characters Character[]
+}
+
+model District {
+  id                   String   @id @default(uuid())
+  planetId             String
+  planet               Planet   @relation(fields: [planetId], references: [id])
+  name                 String
+  description          String?
+  controllingFactionId String?
+  controllingFaction   Faction? @relation(fields: [controllingFactionId], references: [id])
+  dangerLevel          Int      @default(1)
+  lawLevel             Int      @default(5)
+  economyLevel         Int      @default(5)
+
+  buildings  Building[]
+  characters Character[]
+}
+
+model Building {
+  id            String            @id @default(uuid())
+  districtId    String
+  district      District          @relation(fields: [districtId], references: [id])
+  name          String
+  description   String?
+  ownerType     BuildingOwnerType @default(SYSTEM)
+  ownerId       String?
+  functionality Json              @default("[]")
+  status        BuildingStatus    @default(OPEN)
+
+  characters          Character[]
+  factionHeadquarters Faction[]     @relation("FactionHQ")
+  corporationHQs      Corporation[] @relation("CorporationHQ")
+}
+
+model Faction {
+  id                     String    @id @default(uuid())
+  name                   String    @unique
+  description            String?
+  ideology               String?
+  headquartersBuildingId String?
+  headquartersBuilding   Building? @relation("FactionHQ", fields: [headquartersBuildingId], references: [id])
+  treasury               Float     @default(0)
+  influence              Int       @default(0)
+
+  memberships FactionMembership[]
+  districts   District[]
+}
+
+model FactionMembership {
+  id          String                  @id @default(uuid())
+  factionId   String
+  faction     Faction                 @relation(fields: [factionId], references: [id])
+  characterId String
+  character   Character               @relation(fields: [characterId], references: [id])
+  rankName    String                  @default("Member")
+  loyalty     Int                     @default(50)
+  reputation  Int                     @default(0)
+  status      FactionMembershipStatus @default(ACTIVE)
+  joinedAt    DateTime                @default(now())
+
+  @@unique([factionId, characterId])
+}
+
+model Corporation {
+  id                     String              @id @default(uuid())
+  name                   String              @unique
+  description            String?
+  industry               CorporationIndustry
+  headquartersBuildingId String?
+  headquartersBuilding   Building?           @relation("CorporationHQ", fields: [headquartersBuildingId], references: [id])
+  cash                   Float               @default(0)
+  debt                   Float               @default(0)
+  revenue                Float               @default(0)
+  riskOfBankruptcy       Float               @default(0)
+  politicalInfluence     Int                 @default(0)
+  status                 CorporationStatus   @default(STABLE)
+  stockTicker            String?
+  stockPrice             Float?
+  stockVolatility        Float?
+
+  employments CorporationEmployment[]
+}
+
+model CorporationEmployment {
+  id            String      @id @default(uuid())
+  corporationId String
+  corporation   Corporation @relation(fields: [corporationId], references: [id])
+  characterId   String
+  character     Character   @relation(fields: [characterId], references: [id])
+  role          String
+  salary        Float       @default(0)
+  rank          String      @default("Employee")
+  status        String      @default("ACTIVE")
+  startedAt     DateTime    @default(now())
+
+  @@unique([corporationId, characterId])
+}
+
+model ItemDefinition {
+  id           String       @id @default(uuid())
+  name         String       @unique
+  description  String?
+  category     ItemCategory
+  rarity       ItemRarity   @default(COMMON)
+  baseValue    Float        @default(0)
+  weight       Float        @default(0)
+  effects      Json?
+  requirements Json?
+  weaponData   Json?
+  clothingData Json?
+  toolData     Json?
+  vehicleData  Json?
+
+  instances ItemInstance[]
+}
+
+model ItemInstance {
+  id               String         @id @default(uuid())
+  itemDefinitionId String
+  itemDefinition   ItemDefinition @relation(fields: [itemDefinitionId], references: [id])
+  ownerType        ItemOwnerType
+  ownerId          String
+  condition        Int            @default(100)
+  customName       String?
+  modifiers        Json?
+  createdAt        DateTime       @default(now())
+
+  character Character? @relation(fields: [ownerId], references: [id], map: "item_instance_character_fk")
+}
+
+model OpportunityDefinition {
+  id                String                  @id @default(uuid())
+  title             String
+  description       String?
+  kind              OpportunityKind
+  postedByType      OpportunityPostedByType @default(SYSTEM)
+  postedById        String?
+  type              OpportunityType
+  requirements      Json                    @default("[]")
+  durationMinutes   Int?
+  difficulty        Int                     @default(1)
+  rewards           Json                    @default("[]")
+  risks             Json                    @default("[]")
+  possibleEventIds  Json                    @default("[]")
+  repeatability     Json?
+  questData         Json?
+  startsAvailableAt DateTime?
+  endsAvailableAt   DateTime?
+  createdAt         DateTime                @default(now())
+
+  instances OpportunityInstance[]
+}
+
+model OpportunityInstance {
+  id           String                    @id @default(uuid())
+  definitionId String
+  definition   OpportunityDefinition     @relation(fields: [definitionId], references: [id])
+  characterId  String
+  character    Character                 @relation(fields: [characterId], references: [id])
+  status       OpportunityInstanceStatus @default(IN_PROGRESS)
+  startedAt    DateTime                  @default(now())
+  completesAt  DateTime
+  completedAt  DateTime?
+  progress     Json?
+  rolledEvents Json?
+  outcome      Json?
+}
+
+model WorldEvent {
+  id               String           @id @default(uuid())
+  title            String
+  description      String?
+  scope            WorldEventScope
+  triggeredByType  String?
+  triggeredById    String?
+  affectedEntities Json             @default("[]")
+  requirements     Json             @default("[]")
+  effects          Json             @default("[]")
+  startsAt         DateTime?
+  endsAt           DateTime?
+  status           WorldEventStatus @default(SCHEDULED)
+}
+
+model Relationship {
+  id               String           @id @default(uuid())
+  sourceType       String
+  sourceId         String
+  targetType       String
+  targetId         String
+  relationshipType RelationshipType
+  value            Float            @default(0)
+  metadata         Json?
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([sourceType, sourceId, targetType, targetId, relationshipType])
+}
+
+model ActivityLog {
+  id              String       @id @default(uuid())
+  playerId        String
+  player          Player       @relation(fields: [playerId], references: [id])
+  characterId     String?
+  character       Character?   @relation(fields: [characterId], references: [id])
+  type            ActivityType
+  message         String
+  relatedEntities Json?
+  metadata        Json?
+  createdAt       DateTime     @default(now())
+}
