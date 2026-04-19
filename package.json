@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
     "build": "npm run build --workspace=apps/api",
     "start": "npm run start --workspace=apps/api",
     "test": "npm run test --workspace=apps/api && npm run test --workspace=packages/game-rules",
@@ -16,6 +17,12 @@
     "db:seed": "npx ts-node --project prisma/tsconfig.seed.json prisma/seed.ts",
     "lint": "eslint \"{apps,packages}/**/*.ts\" --fix",
     "format": "prettier --write \"{apps,packages,prisma}/**/*.ts\""
+  },
+  "overrides": {
+    "next": {
+      "postcss": ">=8.5.10"
+    },
+    "postcss": ">=8.5.10"
   },
   "devDependencies": {
     "@types/node": "^20.19.39",
