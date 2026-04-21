@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ActivityType } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const STAT_XP_GAIN_PROBABILITY = 0.5;
@@ -12,9 +18,12 @@ export class OpportunitiesService {
     return this.prisma.opportunityDefinition.findMany({ orderBy: { createdAt: 'desc' } });
   }
 
-  async findAvailableForCharacter(characterId: string) {
+  async findAvailableForCharacter(characterId: string, playerId: string) {
     const character = await this.prisma.character.findUnique({ where: { id: characterId } });
     if (!character) throw new NotFoundException(`Character ${characterId} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only access opportunities for your own character');
+    }
 
     const now = new Date();
     const all = await this.prisma.opportunityDefinition.findMany({
@@ -39,7 +48,13 @@ export class OpportunitiesService {
     });
   }
 
-  async findInstancesForCharacter(characterId: string) {
+  async findInstancesForCharacter(characterId: string, playerId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id: characterId } });
+    if (!character) throw new NotFoundException(`Character ${characterId} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only access opportunities for your own character');
+    }
+
     return this.prisma.opportunityInstance.findMany({
       where: { characterId },
       include: { definition: true },
@@ -47,7 +62,7 @@ export class OpportunitiesService {
     });
   }
 
-  async acceptOpportunity(opportunityId: string, characterId: string) {
+  async acceptOpportunity(opportunityId: string, characterId: string, playerId: string) {
     const [definition, character] = await Promise.all([
       this.prisma.opportunityDefinition.findUnique({ where: { id: opportunityId } }),
       this.prisma.character.findUnique({ where: { id: characterId } }),
@@ -55,6 +70,9 @@ export class OpportunitiesService {
 
     if (!definition) throw new NotFoundException(`Opportunity ${opportunityId} not found`);
     if (!character) throw new NotFoundException(`Character ${characterId} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only accept opportunities for your own character');
+    }
 
     // Check if already in progress
     const existing = await this.prisma.opportunityInstance.findFirst({
@@ -119,12 +137,15 @@ export class OpportunitiesService {
     return instance;
   }
 
-  async resolveInstance(instanceId: string) {
+  async resolveInstance(instanceId: string, playerId: string) {
     const instance = await this.prisma.opportunityInstance.findUnique({
       where: { id: instanceId },
       include: { definition: true, character: true },
     });
     if (!instance) throw new NotFoundException(`Instance ${instanceId} not found`);
+    if (instance.character.playerId !== playerId) {
+      throw new ForbiddenException('You can only resolve your own opportunity instances');
+    }
     if (instance.status === 'COMPLETED' || instance.status === 'FAILED') {
       throw new BadRequestException(`Instance already ${instance.status}`);
     }
@@ -232,7 +253,9 @@ export class OpportunitiesService {
 
     // Log activity
     if (character.playerId) {
-      const activityType = success ? this.resolveActivityType(definition.kind) : 'GIG_FAILED';
+      const activityType: ActivityType = success
+        ? this.resolveActivityType(definition.kind)
+        : 'GIG_FAILED';
       await this.prisma.activityLog.create({
         data: {
           playerId: character.playerId,
@@ -249,7 +272,7 @@ export class OpportunitiesService {
     return updatedInstance;
   }
 
-  private acceptActivityType(kind: string): string {
+  private acceptActivityType(kind: string): ActivityType {
     switch (kind) {
       case 'QUEST':
         return 'QUEST_STARTED';
@@ -260,7 +283,7 @@ export class OpportunitiesService {
     }
   }
 
-  private resolveActivityType(kind: string): string {
+  private resolveActivityType(kind: string): ActivityType {
     switch (kind) {
       case 'QUEST':
         return 'QUEST_COMPLETED';

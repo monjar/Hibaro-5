@@ -175,11 +175,13 @@ enum RelationshipType {
 }
 
 enum ActivityType {
+  REGISTERED
   LOGIN
   LOGOUT
   GIG_ACCEPTED
   GIG_COMPLETED
   GIG_FAILED
+  JOB_ACCEPTED
   JOB_COMPLETED
   QUEST_STARTED
   QUEST_COMPLETED
@@ -199,6 +201,7 @@ model Player {
   id          String   @id @default(uuid())
   username    String   @unique
   email       String?  @unique
+  passwordHash String
   createdAt   DateTime @default(now())
   lastLoginAt DateTime @default(now())
 

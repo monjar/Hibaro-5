@@ -11,6 +11,10 @@ export class SimulationService {
 
   async tick() {
     const now = new Date();
+    const results: Array<
+      | { instanceId: string; status: string; outcome: unknown }
+      | { instanceId: string; error: string }
+    > = [];
 
     // Find all due opportunity instances
     const dueInstances = await this.prisma.opportunityInstance.findMany({
@@ -21,7 +25,6 @@ export class SimulationService {
       include: { definition: true, character: true },
     });
 
-    const results = [];
     for (const instance of dueInstances) {
       try {
         const result = await this.opportunitiesService.resolveInstanceInternal(instance);
