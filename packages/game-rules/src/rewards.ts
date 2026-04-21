@@ -86,7 +86,8 @@ export function applyRewards(
     }
     if (partial.corporationReputationChanges) {
       for (const [id, val] of Object.entries(partial.corporationReputationChanges)) {
-        result.corporationReputationChanges[id] = (result.corporationReputationChanges[id] ?? 0) + val;
+        result.corporationReputationChanges[id] =
+          (result.corporationReputationChanges[id] ?? 0) + val;
       }
     }
     if (partial.buildingsToUnlock) result.buildingsToUnlock.push(...partial.buildingsToUnlock);

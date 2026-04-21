@@ -50,7 +50,8 @@ async function resolveOpportunityInstance(instanceId: string) {
         appliedRewards.push(reward);
       } else if (reward.type === 'STAT_XP') {
         if (Math.random() < 0.5 && reward.key) {
-          characterUpdates[reward.key] = ((character[reward.key as keyof typeof character] || 0) as number) + 1;
+          characterUpdates[reward.key] =
+            ((character[reward.key as keyof typeof character] || 0) as number) + 1;
         }
         appliedRewards.push(reward);
       }
@@ -60,7 +61,10 @@ async function resolveOpportunityInstance(instanceId: string) {
       if (Math.random() < (risk.probability || 0.3)) {
         for (const consequence of risk.consequences || []) {
           if (consequence.type === 'MODIFY_WANTED_LEVEL') {
-            characterUpdates.wantedLevel = Math.max(0, (character.wantedLevel || 0) + consequence.value);
+            characterUpdates.wantedLevel = Math.max(
+              0,
+              (character.wantedLevel || 0) + consequence.value,
+            );
             appliedRisks.push(consequence);
           } else if (consequence.type === 'MODIFY_STAT' && consequence.key === 'health') {
             characterUpdates.health = Math.max(0, (character.health || 100) + consequence.value);
@@ -96,7 +100,11 @@ async function resolveOpportunityInstance(instanceId: string) {
 
   if (character.playerId) {
     const kind = definition.kind;
-    let activityType: any = success ? (kind === 'GIG' ? 'GIG_COMPLETED' : 'JOB_COMPLETED') : 'GIG_FAILED';
+    const activityType: any = success
+      ? kind === 'GIG'
+        ? 'GIG_COMPLETED'
+        : 'JOB_COMPLETED'
+      : 'GIG_FAILED';
     await prisma.activityLog.create({
       data: {
         playerId: character.playerId,
