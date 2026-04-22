@@ -2,10 +2,10 @@ import { randomBytes, scryptSync } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
-const TEST_PLAYER_PASSWORD = 'changeme123';
+const TEST_PLAYER_PASSWORD = process.env.SEED_TEST_PLAYER_PASSWORD ?? 'changeme123';
 const PASSWORD_HASH_KEY_LENGTH = 32;
 const PASSWORD_HASH_OPTIONS = {
-  N: 16384,
+  N: 32768,
   r: 8,
   p: 1,
 } as const;
@@ -767,9 +767,10 @@ async function main() {
     },
   });
 
-  console.log(
-    `✅ Test player: test_player | Password: ${TEST_PLAYER_PASSWORD} | Character: Nova Rook (id: ${novaRook.id})`,
-  );
+  console.log(`✅ Test player: test_player | Character: Nova Rook (id: ${novaRook.id})`);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`   Default seed password: ${TEST_PLAYER_PASSWORD}`);
+  }
 
   // ==================== OPPORTUNITY DEFINITIONS ====================
 

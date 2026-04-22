@@ -28,8 +28,10 @@ export class OpportunitiesService {
     const now = new Date();
     const all = await this.prisma.opportunityDefinition.findMany({
       where: {
-        OR: [{ startsAvailableAt: null }, { startsAvailableAt: { lte: now } }],
-        AND: [{ OR: [{ endsAvailableAt: null }, { endsAvailableAt: { gte: now } }] }],
+        AND: [
+          { OR: [{ startsAvailableAt: null }, { startsAvailableAt: { lte: now } }] },
+          { OR: [{ endsAvailableAt: null }, { endsAvailableAt: { gte: now } }] },
+        ],
       },
     });
 
