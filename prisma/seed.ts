@@ -3,10 +3,18 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 const TEST_PLAYER_PASSWORD = 'changeme123';
+const PASSWORD_HASH_KEY_LENGTH = 32;
+const PASSWORD_HASH_OPTIONS = {
+  N: 16384,
+  r: 8,
+  p: 1,
+} as const;
 
 function hashPassword(password: string) {
   const salt = randomBytes(16).toString('hex');
-  const hash = scryptSync(password, salt, 64).toString('hex');
+  const hash = scryptSync(password, salt, PASSWORD_HASH_KEY_LENGTH, PASSWORD_HASH_OPTIONS).toString(
+    'hex',
+  );
   return `${salt}:${hash}`;
 }
 

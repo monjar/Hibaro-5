@@ -7,7 +7,7 @@ export class RegisterDto {
   @IsNotEmpty()
   @MinLength(3)
   @MaxLength(50)
-  @Matches(/^[a-z0-9_]+$/i, {
+  @Matches(/^[a-z0-9_]+$/, {
     message: 'Username may only contain letters, numbers, and underscores',
   })
   username!: string;
