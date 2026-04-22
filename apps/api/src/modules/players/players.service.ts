@@ -19,9 +19,9 @@ export class PlayersService {
     });
     if (!player) throw new NotFoundException(`Player ${identifier} not found`);
 
-    const { passwordHash, ...safePlayer } = player;
-    void passwordHash;
-    return safePlayer;
+    const safePlayer: Partial<typeof player> = { ...player };
+    delete safePlayer.passwordHash;
+    return safePlayer as Omit<typeof player, 'passwordHash'>;
   }
 
   async getActivity(identifier: string, currentPlayer: AuthenticatedPlayer, page = 1, limit = 20) {

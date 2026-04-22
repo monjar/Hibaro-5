@@ -29,9 +29,9 @@ export class CharactersService {
       return character;
     }
 
-    const { passwordHash, ...safePlayer } = character.player;
-    void passwordHash;
-    return { ...character, player: safePlayer };
+    const safePlayer: Partial<typeof character.player> = { ...character.player };
+    delete safePlayer.passwordHash;
+    return { ...character, player: safePlayer as Omit<typeof character.player, 'passwordHash'> };
   }
 
   async getSummary(id: string, playerId: string) {

@@ -237,8 +237,8 @@ export class AuthService {
     lastLoginAt: Date;
     character: SafePlayer['character'];
   }): SafePlayer {
-    const { passwordHash, ...safePlayer } = player;
-    void passwordHash;
-    return safePlayer;
+    const safePlayer: Partial<typeof player> = { ...player };
+    delete safePlayer.passwordHash;
+    return safePlayer as SafePlayer;
   }
 }
