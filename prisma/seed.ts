@@ -768,9 +768,6 @@ async function main() {
   });
 
   console.log(`✅ Test player: test_player | Character: Nova Rook (id: ${novaRook.id})`);
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`   Default seed password: ${TEST_PLAYER_PASSWORD}`);
-  }
 
   // ==================== OPPORTUNITY DEFINITIONS ====================
 

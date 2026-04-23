@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 
+type SimulationResult =
+  | { instanceId: string; status: string; outcome: unknown }
+  | { instanceId: string; error: string };
+
 @Injectable()
 export class SimulationService {
   constructor(
@@ -11,10 +15,7 @@ export class SimulationService {
 
   async tick() {
     const now = new Date();
-    const results: Array<
-      | { instanceId: string; status: string; outcome: unknown }
-      | { instanceId: string; error: string }
-    > = [];
+    const results: SimulationResult[] = [];
 
     // Find all due opportunity instances
     const dueInstances = await this.prisma.opportunityInstance.findMany({

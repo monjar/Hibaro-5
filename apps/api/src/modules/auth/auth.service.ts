@@ -125,11 +125,11 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const identifier = dto.identifier.trim();
-    const normalizedEmail = identifier.toLowerCase();
+    const normalizedIdentifier = identifier.toLowerCase();
 
     const player = await this.prisma.player.findFirst({
       where: {
-        OR: [{ username: identifier.toLowerCase() }, { email: normalizedEmail }],
+        OR: [{ username: normalizedIdentifier }, { email: normalizedIdentifier }],
       },
       include: { character: true },
     });

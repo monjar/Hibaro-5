@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { Worker, Queue } from 'bullmq';
-import { PrismaClient } from '@prisma/client';
-import { calculateOpportunitySuccessChance } from '@heliora/game-rules';
+import { ActivityType, PrismaClient } from '@prisma/client';
+import { calculateOpportunitySuccessChance, OpportunityDefinition } from '@heliora/game-rules';
 
 const prisma = new PrismaClient();
 
@@ -33,7 +33,20 @@ async function resolveOpportunityInstance(instanceId: string) {
   }
 
   const { definition, character } = instance;
-  const successChance = calculateOpportunitySuccessChance(character, definition);
+  const rulesDefinition: OpportunityDefinition = {
+    ...definition,
+    durationMinutes: definition.durationMinutes ?? undefined,
+    requirements: Array.isArray(definition.requirements)
+      ? (definition.requirements as unknown as OpportunityDefinition['requirements'])
+      : [],
+    rewards: Array.isArray(definition.rewards)
+      ? (definition.rewards as unknown as OpportunityDefinition['rewards'])
+      : [],
+    risks: Array.isArray(definition.risks)
+      ? (definition.risks as unknown as OpportunityDefinition['risks'])
+      : [],
+  };
+  const successChance = calculateOpportunitySuccessChance(character, rulesDefinition);
   const roll = Math.random();
   const success = roll <= successChance;
 
@@ -100,10 +113,12 @@ async function resolveOpportunityInstance(instanceId: string) {
 
   if (character.playerId) {
     const kind = definition.kind;
-    const activityType: any = success
+    const activityType: ActivityType = success
       ? kind === 'GIG'
         ? 'GIG_COMPLETED'
-        : 'JOB_COMPLETED'
+        : kind === 'QUEST'
+          ? 'QUEST_COMPLETED'
+          : 'JOB_COMPLETED'
       : 'GIG_FAILED';
     await prisma.activityLog.create({
       data: {
