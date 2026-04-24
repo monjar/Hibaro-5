@@ -27,10 +27,7 @@ export class OpportunitiesController {
 
   @Post(':opportunityId/accept')
   @ApiOperation({ summary: 'Accept an opportunity' })
-  accept(
-    @Param('opportunityId') opportunityId: string,
-    @Body() body: { characterId: string },
-  ) {
+  accept(@Param('opportunityId') opportunityId: string, @Body() body: { characterId: string }) {
     return this.opportunitiesService.acceptOpportunity(opportunityId, body.characterId);
   }
 

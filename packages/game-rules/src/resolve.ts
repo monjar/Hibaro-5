@@ -57,10 +57,16 @@ export function resolveOpportunity(
     }
 
     if (riskResult.wantedLevelDelta !== 0) {
-      characterUpdates.wantedLevel = Math.max(0, character.wantedLevel + riskResult.wantedLevelDelta);
+      characterUpdates.wantedLevel = Math.max(
+        0,
+        character.wantedLevel + riskResult.wantedLevelDelta,
+      );
     }
     if (riskResult.healthDelta !== 0) {
-      characterUpdates.health = Math.max(0, Math.min(character.maxHealth, character.health + riskResult.healthDelta));
+      characterUpdates.health = Math.max(
+        0,
+        Math.min(character.maxHealth, character.health + riskResult.healthDelta),
+      );
     }
     if (riskResult.creditsDelta !== 0) {
       characterUpdates.credits = character.credits + riskResult.creditsDelta;

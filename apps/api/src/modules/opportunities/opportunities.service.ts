@@ -20,9 +20,7 @@ export class OpportunitiesService {
     const all = await this.prisma.opportunityDefinition.findMany({
       where: {
         OR: [{ startsAvailableAt: null }, { startsAvailableAt: { lte: now } }],
-        AND: [
-          { OR: [{ endsAvailableAt: null }, { endsAvailableAt: { gte: now } }] },
-        ],
+        AND: [{ OR: [{ endsAvailableAt: null }, { endsAvailableAt: { gte: now } }] }],
       },
     });
 
@@ -60,7 +58,11 @@ export class OpportunitiesService {
 
     // Check if already in progress
     const existing = await this.prisma.opportunityInstance.findFirst({
-      where: { definitionId: opportunityId, characterId, status: { in: ['IN_PROGRESS', 'ACCEPTED'] } },
+      where: {
+        definitionId: opportunityId,
+        characterId,
+        status: { in: ['IN_PROGRESS', 'ACCEPTED'] },
+      },
     });
     if (existing) throw new BadRequestException('Opportunity already in progress');
 
@@ -160,10 +162,24 @@ export class OpportunitiesService {
           appliedRewards.push(reward);
         } else if (reward.type === 'FACTION_REPUTATION') {
           // Update relationship
-          await this.upsertRelationship('CHARACTER', character.id, 'FACTION', reward.factionId, 'REPUTATION', reward.value);
+          await this.upsertRelationship(
+            'CHARACTER',
+            character.id,
+            'FACTION',
+            reward.factionId,
+            'REPUTATION',
+            reward.value,
+          );
           appliedRewards.push(reward);
         } else if (reward.type === 'CORPORATION_REPUTATION') {
-          await this.upsertRelationship('CHARACTER', character.id, 'CORPORATION', reward.corporationId, 'REPUTATION', reward.value);
+          await this.upsertRelationship(
+            'CHARACTER',
+            character.id,
+            'CORPORATION',
+            reward.corporationId,
+            'REPUTATION',
+            reward.value,
+          );
           appliedRewards.push(reward);
         }
       }
@@ -175,7 +191,10 @@ export class OpportunitiesService {
           const consequences = risk.consequences || [];
           for (const consequence of consequences) {
             if (consequence.type === 'MODIFY_WANTED_LEVEL') {
-              characterUpdates.wantedLevel = Math.max(0, (character.wantedLevel || 0) + consequence.value);
+              characterUpdates.wantedLevel = Math.max(
+                0,
+                (character.wantedLevel || 0) + consequence.value,
+              );
               appliedRisks.push(consequence);
             } else if (consequence.type === 'MODIFY_STAT' && consequence.key === 'health') {
               characterUpdates.health = Math.max(0, (character.health || 100) + consequence.value);
@@ -213,9 +232,7 @@ export class OpportunitiesService {
 
     // Log activity
     if (character.playerId) {
-      const activityType = success
-        ? this.resolveActivityType(definition.kind)
-        : 'GIG_FAILED';
+      const activityType = success ? this.resolveActivityType(definition.kind) : 'GIG_FAILED';
       await this.prisma.activityLog.create({
         data: {
           playerId: character.playerId,
@@ -234,17 +251,23 @@ export class OpportunitiesService {
 
   private acceptActivityType(kind: string): string {
     switch (kind) {
-      case 'QUEST': return 'QUEST_STARTED';
-      case 'JOB': return 'JOB_ACCEPTED';
-      default: return 'GIG_ACCEPTED';
+      case 'QUEST':
+        return 'QUEST_STARTED';
+      case 'JOB':
+        return 'JOB_ACCEPTED';
+      default:
+        return 'GIG_ACCEPTED';
     }
   }
 
   private resolveActivityType(kind: string): string {
     switch (kind) {
-      case 'QUEST': return 'QUEST_COMPLETED';
-      case 'JOB': return 'JOB_COMPLETED';
-      default: return 'GIG_COMPLETED';
+      case 'QUEST':
+        return 'QUEST_COMPLETED';
+      case 'JOB':
+        return 'JOB_COMPLETED';
+      default:
+        return 'GIG_COMPLETED';
     }
   }
 
