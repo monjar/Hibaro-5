@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { Worker, Queue } from 'bullmq';
-import { PrismaClient } from '@prisma/client';
-import { calculateOpportunitySuccessChance } from '@heliora/game-rules';
+import { ActivityType, PrismaClient } from '@prisma/client';
+import { calculateOpportunitySuccessChance, OpportunityDefinition } from '@heliora/game-rules';
 
 const prisma = new PrismaClient();
 
@@ -33,7 +33,20 @@ async function resolveOpportunityInstance(instanceId: string) {
   }
 
   const { definition, character } = instance;
-  const successChance = calculateOpportunitySuccessChance(character, definition);
+  const rulesDefinition: OpportunityDefinition = {
+    ...definition,
+    durationMinutes: definition.durationMinutes ?? undefined,
+    requirements: Array.isArray(definition.requirements)
+      ? (definition.requirements as unknown as OpportunityDefinition['requirements'])
+      : [],
+    rewards: Array.isArray(definition.rewards)
+      ? (definition.rewards as unknown as OpportunityDefinition['rewards'])
+      : [],
+    risks: Array.isArray(definition.risks)
+      ? (definition.risks as unknown as OpportunityDefinition['risks'])
+      : [],
+  };
+  const successChance = calculateOpportunitySuccessChance(character, rulesDefinition);
   const roll = Math.random();
   const success = roll <= successChance;
 
@@ -50,7 +63,8 @@ async function resolveOpportunityInstance(instanceId: string) {
         appliedRewards.push(reward);
       } else if (reward.type === 'STAT_XP') {
         if (Math.random() < 0.5 && reward.key) {
-          characterUpdates[reward.key] = ((character[reward.key as keyof typeof character] || 0) as number) + 1;
+          characterUpdates[reward.key] =
+            ((character[reward.key as keyof typeof character] || 0) as number) + 1;
         }
         appliedRewards.push(reward);
       }
@@ -60,7 +74,10 @@ async function resolveOpportunityInstance(instanceId: string) {
       if (Math.random() < (risk.probability || 0.3)) {
         for (const consequence of risk.consequences || []) {
           if (consequence.type === 'MODIFY_WANTED_LEVEL') {
-            characterUpdates.wantedLevel = Math.max(0, (character.wantedLevel || 0) + consequence.value);
+            characterUpdates.wantedLevel = Math.max(
+              0,
+              (character.wantedLevel || 0) + consequence.value,
+            );
             appliedRisks.push(consequence);
           } else if (consequence.type === 'MODIFY_STAT' && consequence.key === 'health') {
             characterUpdates.health = Math.max(0, (character.health || 100) + consequence.value);
@@ -96,7 +113,13 @@ async function resolveOpportunityInstance(instanceId: string) {
 
   if (character.playerId) {
     const kind = definition.kind;
-    let activityType: any = success ? (kind === 'GIG' ? 'GIG_COMPLETED' : 'JOB_COMPLETED') : 'GIG_FAILED';
+    const activityType: ActivityType = success
+      ? kind === 'GIG'
+        ? 'GIG_COMPLETED'
+        : kind === 'QUEST'
+          ? 'QUEST_COMPLETED'
+          : 'JOB_COMPLETED'
+      : 'GIG_FAILED';
     await prisma.activityLog.create({
       data: {
         playerId: character.playerId,

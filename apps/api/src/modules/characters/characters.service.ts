@@ -1,11 +1,16 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class CharactersService {
   constructor(private prisma: PrismaService) {}
 
-  async findById(id: string) {
+  async findById(id: string, playerId: string) {
     const character = await this.prisma.character.findUnique({
       where: { id },
       include: {
@@ -16,11 +21,21 @@ export class CharactersService {
       },
     });
     if (!character) throw new NotFoundException(`Character ${id} not found`);
-    return character;
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only access your own character');
+    }
+
+    if (!character.player) {
+      return character;
+    }
+
+    const safePlayer: Partial<typeof character.player> = { ...character.player };
+    delete safePlayer.passwordHash;
+    return { ...character, player: safePlayer as Omit<typeof character.player, 'passwordHash'> };
   }
 
-  async getSummary(id: string) {
-    const character = await this.findById(id);
+  async getSummary(id: string, playerId: string) {
+    const character = await this.findById(id, playerId);
     const memberships = await this.prisma.factionMembership.findMany({
       where: { characterId: id },
       include: { faction: true },
@@ -37,21 +52,24 @@ export class CharactersService {
     return { character, memberships, employments, recentActivity };
   }
 
-  async getRelationships(id: string) {
+  async getRelationships(id: string, playerId: string) {
+    await this.findById(id, playerId);
     return this.prisma.relationship.findMany({
       where: { sourceType: 'CHARACTER', sourceId: id },
       orderBy: { updatedAt: 'desc' },
     });
   }
 
-  async getInventory(id: string) {
+  async getInventory(id: string, playerId: string) {
+    await this.findById(id, playerId);
     return this.prisma.itemInstance.findMany({
       where: { ownerType: 'CHARACTER', ownerId: id },
       include: { itemDefinition: true },
     });
   }
 
-  async getLocation(id: string) {
+  async getLocation(id: string, playerId: string) {
+    await this.findById(id, playerId);
     const character = await this.prisma.character.findUnique({
       where: { id },
       select: {
@@ -66,8 +84,12 @@ export class CharactersService {
     return character;
   }
 
-  async travel(id: string, dto: { planetId?: string; districtId?: string; buildingId?: string }) {
-    const character = await this.findById(id);
+  async travel(
+    id: string,
+    playerId: string,
+    dto: { planetId?: string; districtId?: string; buildingId?: string },
+  ) {
+    const character = await this.findById(id, playerId);
 
     // Basic validation: if building, it must be in the district
     if (dto.buildingId) {
