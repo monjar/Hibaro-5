@@ -6,6 +6,7 @@
     "paths": {
       "@heliora/game-rules": ["../../packages/game-rules/src/index.ts"],
       "@heliora/game-types": ["../../packages/game-types/src/index.ts"],
+      "@heliora/platform-sdk": ["../../packages/platform-sdk/src/index.ts"],
       "@heliora/validation": ["../../packages/validation/src/index.ts"]
     }
   },

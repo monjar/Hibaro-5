@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ActivityType, RelationshipType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const STAT_XP_GAIN_PROBABILITY = 0.5;
@@ -135,6 +136,12 @@ export class OpportunitiesService {
   async resolveInstanceInternal(instance: any) {
     const { definition, character } = instance;
     const now = new Date();
+    const relationshipChanges: Array<{
+      targetType: string;
+      targetId: string;
+      relationshipType: RelationshipType;
+      delta: number;
+    }> = [];
 
     // Calculate success chance
     const successChance = this.calculateSuccessChance(character, definition);
@@ -170,6 +177,12 @@ export class OpportunitiesService {
             'REPUTATION',
             reward.value,
           );
+          relationshipChanges.push({
+            targetType: 'FACTION',
+            targetId: reward.factionId,
+            relationshipType: RelationshipType.REPUTATION,
+            delta: reward.value,
+          });
           appliedRewards.push(reward);
         } else if (reward.type === 'CORPORATION_REPUTATION') {
           await this.upsertRelationship(
@@ -180,6 +193,12 @@ export class OpportunitiesService {
             'REPUTATION',
             reward.value,
           );
+          relationshipChanges.push({
+            targetType: 'CORPORATION',
+            targetId: reward.corporationId,
+            relationshipType: RelationshipType.REPUTATION,
+            delta: reward.value,
+          });
           appliedRewards.push(reward);
         }
       }
@@ -217,6 +236,28 @@ export class OpportunitiesService {
       successChance: Math.round(successChance * 100) / 100,
       appliedRewards,
       appliedRisks,
+      characterLedger: {
+        before: {
+          credits: character.credits,
+          health: character.health,
+          energy: character.energy,
+          wantedLevel: character.wantedLevel,
+        },
+        after: {
+          credits: characterUpdates.credits ?? character.credits,
+          health: characterUpdates.health ?? character.health,
+          energy: characterUpdates.energy ?? character.energy,
+          wantedLevel: characterUpdates.wantedLevel ?? character.wantedLevel,
+        },
+        delta: {
+          credits: (characterUpdates.credits ?? character.credits) - character.credits,
+          health: (characterUpdates.health ?? character.health) - character.health,
+          energy: (characterUpdates.energy ?? character.energy) - character.energy,
+          wantedLevel:
+            (characterUpdates.wantedLevel ?? character.wantedLevel) - character.wantedLevel,
+        },
+      },
+      relationshipChanges,
       resolvedAt: now.toISOString(),
     };
 
@@ -249,18 +290,18 @@ export class OpportunitiesService {
     return updatedInstance;
   }
 
-  private acceptActivityType(kind: string): string {
+  private acceptActivityType(kind: string): ActivityType {
     switch (kind) {
       case 'QUEST':
         return 'QUEST_STARTED';
       case 'JOB':
-        return 'JOB_ACCEPTED';
+        return 'GIG_ACCEPTED';
       default:
         return 'GIG_ACCEPTED';
     }
   }
 
-  private resolveActivityType(kind: string): string {
+  private resolveActivityType(kind: string): ActivityType {
     switch (kind) {
       case 'QUEST':
         return 'QUEST_COMPLETED';
