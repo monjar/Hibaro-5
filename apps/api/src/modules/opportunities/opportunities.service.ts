@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ActivityType, RelationshipType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const STAT_XP_GAIN_PROBABILITY = 0.5;
@@ -20,9 +21,7 @@ export class OpportunitiesService {
     const all = await this.prisma.opportunityDefinition.findMany({
       where: {
         OR: [{ startsAvailableAt: null }, { startsAvailableAt: { lte: now } }],
-        AND: [
-          { OR: [{ endsAvailableAt: null }, { endsAvailableAt: { gte: now } }] },
-        ],
+        AND: [{ OR: [{ endsAvailableAt: null }, { endsAvailableAt: { gte: now } }] }],
       },
     });
 
@@ -60,7 +59,11 @@ export class OpportunitiesService {
 
     // Check if already in progress
     const existing = await this.prisma.opportunityInstance.findFirst({
-      where: { definitionId: opportunityId, characterId, status: { in: ['IN_PROGRESS', 'ACCEPTED'] } },
+      where: {
+        definitionId: opportunityId,
+        characterId,
+        status: { in: ['IN_PROGRESS', 'ACCEPTED'] },
+      },
     });
     if (existing) throw new BadRequestException('Opportunity already in progress');
 
@@ -133,6 +136,12 @@ export class OpportunitiesService {
   async resolveInstanceInternal(instance: any) {
     const { definition, character } = instance;
     const now = new Date();
+    const relationshipChanges: Array<{
+      targetType: string;
+      targetId: string;
+      relationshipType: RelationshipType;
+      delta: number;
+    }> = [];
 
     // Calculate success chance
     const successChance = this.calculateSuccessChance(character, definition);
@@ -160,10 +169,36 @@ export class OpportunitiesService {
           appliedRewards.push(reward);
         } else if (reward.type === 'FACTION_REPUTATION') {
           // Update relationship
-          await this.upsertRelationship('CHARACTER', character.id, 'FACTION', reward.factionId, 'REPUTATION', reward.value);
+          await this.upsertRelationship(
+            'CHARACTER',
+            character.id,
+            'FACTION',
+            reward.factionId,
+            'REPUTATION',
+            reward.value,
+          );
+          relationshipChanges.push({
+            targetType: 'FACTION',
+            targetId: reward.factionId,
+            relationshipType: RelationshipType.REPUTATION,
+            delta: reward.value,
+          });
           appliedRewards.push(reward);
         } else if (reward.type === 'CORPORATION_REPUTATION') {
-          await this.upsertRelationship('CHARACTER', character.id, 'CORPORATION', reward.corporationId, 'REPUTATION', reward.value);
+          await this.upsertRelationship(
+            'CHARACTER',
+            character.id,
+            'CORPORATION',
+            reward.corporationId,
+            'REPUTATION',
+            reward.value,
+          );
+          relationshipChanges.push({
+            targetType: 'CORPORATION',
+            targetId: reward.corporationId,
+            relationshipType: RelationshipType.REPUTATION,
+            delta: reward.value,
+          });
           appliedRewards.push(reward);
         }
       }
@@ -175,7 +210,10 @@ export class OpportunitiesService {
           const consequences = risk.consequences || [];
           for (const consequence of consequences) {
             if (consequence.type === 'MODIFY_WANTED_LEVEL') {
-              characterUpdates.wantedLevel = Math.max(0, (character.wantedLevel || 0) + consequence.value);
+              characterUpdates.wantedLevel = Math.max(
+                0,
+                (character.wantedLevel || 0) + consequence.value,
+              );
               appliedRisks.push(consequence);
             } else if (consequence.type === 'MODIFY_STAT' && consequence.key === 'health') {
               characterUpdates.health = Math.max(0, (character.health || 100) + consequence.value);
@@ -198,6 +236,28 @@ export class OpportunitiesService {
       successChance: Math.round(successChance * 100) / 100,
       appliedRewards,
       appliedRisks,
+      characterLedger: {
+        before: {
+          credits: character.credits,
+          health: character.health,
+          energy: character.energy,
+          wantedLevel: character.wantedLevel,
+        },
+        after: {
+          credits: characterUpdates.credits ?? character.credits,
+          health: characterUpdates.health ?? character.health,
+          energy: characterUpdates.energy ?? character.energy,
+          wantedLevel: characterUpdates.wantedLevel ?? character.wantedLevel,
+        },
+        delta: {
+          credits: (characterUpdates.credits ?? character.credits) - character.credits,
+          health: (characterUpdates.health ?? character.health) - character.health,
+          energy: (characterUpdates.energy ?? character.energy) - character.energy,
+          wantedLevel:
+            (characterUpdates.wantedLevel ?? character.wantedLevel) - character.wantedLevel,
+        },
+      },
+      relationshipChanges,
       resolvedAt: now.toISOString(),
     };
 
@@ -213,9 +273,7 @@ export class OpportunitiesService {
 
     // Log activity
     if (character.playerId) {
-      const activityType = success
-        ? this.resolveActivityType(definition.kind)
-        : 'GIG_FAILED';
+      const activityType = success ? this.resolveActivityType(definition.kind) : 'GIG_FAILED';
       await this.prisma.activityLog.create({
         data: {
           playerId: character.playerId,
@@ -232,19 +290,25 @@ export class OpportunitiesService {
     return updatedInstance;
   }
 
-  private acceptActivityType(kind: string): string {
+  private acceptActivityType(kind: string): ActivityType {
     switch (kind) {
-      case 'QUEST': return 'QUEST_STARTED';
-      case 'JOB': return 'JOB_ACCEPTED';
-      default: return 'GIG_ACCEPTED';
+      case 'QUEST':
+        return 'QUEST_STARTED';
+      case 'JOB':
+        return 'JOB_ACCEPTED';
+      default:
+        return 'GIG_ACCEPTED';
     }
   }
 
-  private resolveActivityType(kind: string): string {
+  private resolveActivityType(kind: string): ActivityType {
     switch (kind) {
-      case 'QUEST': return 'QUEST_COMPLETED';
-      case 'JOB': return 'JOB_COMPLETED';
-      default: return 'GIG_COMPLETED';
+      case 'QUEST':
+        return 'QUEST_COMPLETED';
+      case 'JOB':
+        return 'JOB_COMPLETED';
+      default:
+        return 'GIG_COMPLETED';
     }
   }
 

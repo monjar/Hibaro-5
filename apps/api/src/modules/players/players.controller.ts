@@ -15,11 +15,7 @@ export class PlayersController {
 
   @Get(':id/activity')
   @ApiOperation({ summary: 'Get player activity log' })
-  getActivity(
-    @Param('id') id: string,
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-  ) {
+  getActivity(@Param('id') id: string, @Query('page') page = '1', @Query('limit') limit = '20') {
     return this.playersService.getActivity(id, parseInt(page), parseInt(limit));
   }
 }

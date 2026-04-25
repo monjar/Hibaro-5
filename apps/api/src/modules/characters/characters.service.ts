@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { assessTravel } from './travel.utils';
 
 @Injectable()
 export class CharactersService {
@@ -68,22 +70,70 @@ export class CharactersService {
 
   async travel(id: string, dto: { planetId?: string; districtId?: string; buildingId?: string }) {
     const character = await this.findById(id);
+    const destinationPlanetId = dto.planetId ?? character.currentPlanetId;
+    const destinationDistrictId = dto.districtId ?? character.currentDistrictId;
+    const destinationBuildingId = dto.buildingId ?? character.currentBuildingId;
+
+    if (!destinationPlanetId || !destinationDistrictId) {
+      throw new BadRequestException('Travel requires a destination planet and district');
+    }
+
+    const [destinationPlanet, destinationDistrict, destinationBuilding] = await Promise.all([
+      this.prisma.planet.findUnique({ where: { id: destinationPlanetId } }),
+      this.prisma.district.findUnique({
+        where: { id: destinationDistrictId },
+        include: { planet: true, controllingFaction: true },
+      }),
+      destinationBuildingId
+        ? this.prisma.building.findUnique({ where: { id: destinationBuildingId } })
+        : Promise.resolve(null),
+    ]);
+
+    if (!destinationPlanet) throw new NotFoundException('Planet not found');
+    if (!destinationDistrict) throw new NotFoundException('District not found');
+    if (destinationDistrict.planetId !== destinationPlanet.id) {
+      throw new BadRequestException('District does not belong to the requested planet');
+    }
 
     // Basic validation: if building, it must be in the district
-    if (dto.buildingId) {
-      const building = await this.prisma.building.findUnique({ where: { id: dto.buildingId } });
-      if (!building) throw new NotFoundException('Building not found');
-      if (building.status === 'LOCKED_DOWN' || building.status === 'ABANDONED') {
-        throw new BadRequestException(`Building is ${building.status}`);
+    if (destinationBuilding) {
+      if (destinationBuilding.districtId !== destinationDistrict.id) {
+        throw new BadRequestException('Building does not belong to the requested district');
       }
+      if (
+        destinationBuilding.status === 'LOCKED_DOWN' ||
+        destinationBuilding.status === 'ABANDONED'
+      ) {
+        throw new BadRequestException(`Building is ${destinationBuilding.status}`);
+      }
+    }
+
+    const travel = assessTravel({
+      samePlanet: character.currentPlanetId === destinationPlanet.id,
+      sameDistrict: character.currentDistrictId === destinationDistrict.id,
+      destinationPlanetDanger: destinationPlanet.dangerLevel,
+      destinationPlanetLaw: destinationPlanet.lawLevel,
+      destinationDistrictDanger: destinationDistrict.dangerLevel,
+      destinationDistrictLaw: destinationDistrict.lawLevel,
+      destinationDistrictEconomy: destinationDistrict.economyLevel,
+      currentDistrictDanger: character.currentDistrict?.dangerLevel,
+    });
+
+    if (character.credits < travel.travelCost) {
+      throw new BadRequestException(
+        `Travel requires ${travel.travelCost} credits (current: ${character.credits})`,
+      );
     }
 
     const updated = await this.prisma.character.update({
       where: { id },
       data: {
-        currentPlanetId: dto.planetId ?? character.currentPlanetId,
-        currentDistrictId: dto.districtId ?? character.currentDistrictId,
-        currentBuildingId: dto.buildingId ?? character.currentBuildingId,
+        credits: character.credits - travel.travelCost,
+        energy: Math.max(0, character.energy + travel.travelEnergyDelta),
+        wantedLevel: Math.max(0, character.wantedLevel + travel.wantedDelta),
+        currentPlanetId: destinationPlanet.id,
+        currentDistrictId: destinationDistrict.id,
+        currentBuildingId: destinationBuilding?.id ?? destinationBuildingId ?? null,
       },
       include: { currentPlanet: true, currentDistrict: true, currentBuilding: true },
     });
@@ -95,12 +145,33 @@ export class CharactersService {
           playerId: character.playerId,
           characterId: id,
           type: 'LOCATION_CHANGED',
-          message: `${character.name} traveled to a new location`,
-          relatedEntities: dto,
+          message: `${character.name} traveled to ${destinationDistrict.name} on ${destinationPlanet.name}`,
+          relatedEntities: {
+            destination: {
+              planetId: destinationPlanet.id,
+              districtId: destinationDistrict.id,
+              buildingId: destinationBuilding?.id ?? null,
+            },
+            travel: { ...travel },
+            controllingFaction: destinationDistrict.controllingFaction?.name ?? null,
+          } as unknown as Prisma.JsonObject,
         },
       });
     }
 
-    return updated;
+    return {
+      character: updated,
+      travel: {
+        ...travel,
+        destination: {
+          planetId: destinationPlanet.id,
+          planetName: destinationPlanet.name,
+          districtId: destinationDistrict.id,
+          districtName: destinationDistrict.name,
+          buildingId: destinationBuilding?.id ?? null,
+          buildingName: destinationBuilding?.name ?? null,
+        },
+      },
+    };
   }
 }
