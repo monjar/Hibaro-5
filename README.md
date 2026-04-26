@@ -143,6 +143,7 @@ Running `npm run db:seed` creates:
 
 ### Test Player
 - Username: `test_player`
+- Default password: `changeme123` (override with `SEED_TEST_PLAYER_PASSWORD`)
 - Character: **Nova Rook**
 - Starting location: Antrolus / Arrival Yard / Arrival Processing Hub
 - Starting credits: 250
@@ -154,20 +155,27 @@ Running `npm run db:seed` creates:
 GET /health
 ```
 
+### Authentication
+```
+POST /auth/register          # Register a player and starter character
+POST /auth/login             # Log in with username/email + password
+GET  /auth/me                # Authenticated player profile
+```
+
 ### Players
 ```
-GET /players/:id              # Get player with character
-GET /players/:id/activity     # Get activity log (paginated)
+GET /players/:id              # Get your player with character (JWT required)
+GET /players/:id/activity     # Get your activity log (JWT required)
 ```
 
 ### Characters
 ```
-GET  /characters/:id           # Get character details
-GET  /characters/:id/summary   # Character + memberships + activity
-GET  /characters/:id/location  # Current location (planet/district/building)
-GET  /characters/:id/inventory # All items owned by character
-GET  /characters/:id/relationships  # Faction/corp reputation etc.
-POST /characters/:id/travel    # Move to new location
+GET  /characters/:id           # Get your character details (JWT required)
+GET  /characters/:id/summary   # Your character + memberships + activity (JWT required)
+GET  /characters/:id/location  # Your current location (JWT required)
+GET  /characters/:id/inventory # All items owned by your character (JWT required)
+GET  /characters/:id/relationships  # Your faction/corp reputation etc. (JWT required)
+POST /characters/:id/travel    # Move your character to a new location (JWT required)
   Body: { "planetId": "...", "districtId": "...", "buildingId": "..." }
 ```
 
@@ -197,11 +205,11 @@ GET /items/definitions/:id     # Item definition by ID
 ### Opportunities
 ```
 GET  /opportunities                          # All opportunity definitions
-GET  /opportunities/available/:characterId   # Available for character
-GET  /opportunities/instances/:characterId   # Character's accepted opportunities
-POST /opportunities/:opportunityId/accept    # Accept opportunity
+GET  /opportunities/available/:characterId   # Available for your character (JWT required)
+GET  /opportunities/instances/:characterId   # Your accepted opportunities (JWT required)
+POST /opportunities/:opportunityId/accept    # Accept opportunity for your character (JWT required)
   Body: { "characterId": "..." }
-POST /opportunities/instances/:instanceId/resolve  # Manually resolve (dev)
+POST /opportunities/instances/:instanceId/resolve  # Manually resolve your instance (JWT required)
 ```
 
 ### Simulation

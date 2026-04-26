@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ActivityType, RelationshipType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -13,19 +18,23 @@ export class OpportunitiesService {
     return this.prisma.opportunityDefinition.findMany({ orderBy: { createdAt: 'desc' } });
   }
 
-  async findAvailableForCharacter(characterId: string) {
+  async findAvailableForCharacter(characterId: string, playerId: string) {
     const character = await this.prisma.character.findUnique({ where: { id: characterId } });
     if (!character) throw new NotFoundException(`Character ${characterId} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only access opportunities for your own character');
+    }
 
     const now = new Date();
     const all = await this.prisma.opportunityDefinition.findMany({
       where: {
-        OR: [{ startsAvailableAt: null }, { startsAvailableAt: { lte: now } }],
-        AND: [{ OR: [{ endsAvailableAt: null }, { endsAvailableAt: { gte: now } }] }],
+        AND: [
+          { OR: [{ startsAvailableAt: null }, { startsAvailableAt: { lte: now } }] },
+          { OR: [{ endsAvailableAt: null }, { endsAvailableAt: { gte: now } }] },
+        ],
       },
     });
 
-    // Filter out opportunities the character already has in progress
     const inProgress = await this.prisma.opportunityInstance.findMany({
       where: { characterId, status: { in: ['IN_PROGRESS', 'ACCEPTED'] } },
       select: { definitionId: true },
@@ -34,13 +43,17 @@ export class OpportunitiesService {
 
     return all.filter((opp) => {
       if (inProgressIds.has(opp.id)) return false;
-      // Check repeatability: if DAILY, check if done today
-      // Simplified: just return available
       return true;
     });
   }
 
-  async findInstancesForCharacter(characterId: string) {
+  async findInstancesForCharacter(characterId: string, playerId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id: characterId } });
+    if (!character) throw new NotFoundException(`Character ${characterId} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only access opportunities for your own character');
+    }
+
     return this.prisma.opportunityInstance.findMany({
       where: { characterId },
       include: { definition: true },
@@ -48,7 +61,7 @@ export class OpportunitiesService {
     });
   }
 
-  async acceptOpportunity(opportunityId: string, characterId: string) {
+  async acceptOpportunity(opportunityId: string, characterId: string, playerId: string) {
     const [definition, character] = await Promise.all([
       this.prisma.opportunityDefinition.findUnique({ where: { id: opportunityId } }),
       this.prisma.character.findUnique({ where: { id: characterId } }),
@@ -56,8 +69,10 @@ export class OpportunitiesService {
 
     if (!definition) throw new NotFoundException(`Opportunity ${opportunityId} not found`);
     if (!character) throw new NotFoundException(`Character ${characterId} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only accept opportunities for your own character');
+    }
 
-    // Check if already in progress
     const existing = await this.prisma.opportunityInstance.findFirst({
       where: {
         definitionId: opportunityId,
@@ -67,7 +82,6 @@ export class OpportunitiesService {
     });
     if (existing) throw new BadRequestException('Opportunity already in progress');
 
-    // Check requirements (basic)
     const requirements = definition.requirements as any[];
     for (const req of requirements) {
       if (req.type === 'STAT_MIN') {
@@ -90,7 +104,7 @@ export class OpportunitiesService {
     const now = new Date();
     const completesAt = definition.durationMinutes
       ? new Date(now.getTime() + definition.durationMinutes * 60 * 1000)
-      : new Date(now.getTime() + 60 * 60 * 1000); // default 1 hour
+      : new Date(now.getTime() + 60 * 60 * 1000);
 
     const instance = await this.prisma.opportunityInstance.create({
       data: {
@@ -103,7 +117,6 @@ export class OpportunitiesService {
       include: { definition: true },
     });
 
-    // Log activity
     if (character.playerId) {
       const activityType = this.acceptActivityType(definition.kind);
       await this.prisma.activityLog.create({
@@ -120,12 +133,15 @@ export class OpportunitiesService {
     return instance;
   }
 
-  async resolveInstance(instanceId: string) {
+  async resolveInstance(instanceId: string, playerId: string) {
     const instance = await this.prisma.opportunityInstance.findUnique({
       where: { id: instanceId },
       include: { definition: true, character: true },
     });
     if (!instance) throw new NotFoundException(`Instance ${instanceId} not found`);
+    if (instance.character.playerId !== playerId) {
+      throw new ForbiddenException('You can only resolve your own opportunity instances');
+    }
     if (instance.status === 'COMPLETED' || instance.status === 'FAILED') {
       throw new BadRequestException(`Instance already ${instance.status}`);
     }
@@ -143,7 +159,6 @@ export class OpportunitiesService {
       delta: number;
     }> = [];
 
-    // Calculate success chance
     const successChance = this.calculateSuccessChance(character, definition);
     const roll = Math.random();
     const success = roll <= successChance;
@@ -156,7 +171,6 @@ export class OpportunitiesService {
     const characterUpdates: any = {};
 
     if (success) {
-      // Apply rewards
       for (const reward of rewards) {
         if (reward.type === 'CREDITS') {
           characterUpdates.credits = (character.credits || 0) + reward.value;
@@ -168,7 +182,6 @@ export class OpportunitiesService {
           }
           appliedRewards.push(reward);
         } else if (reward.type === 'FACTION_REPUTATION') {
-          // Update relationship
           await this.upsertRelationship(
             'CHARACTER',
             character.id,
@@ -203,7 +216,6 @@ export class OpportunitiesService {
         }
       }
     } else {
-      // Apply risks on failure
       for (const risk of risks) {
         const riskRoll = Math.random();
         if (riskRoll < (risk.probability ?? DEFAULT_RISK_PROBABILITY)) {
@@ -224,12 +236,10 @@ export class OpportunitiesService {
       }
     }
 
-    // Update character
     if (Object.keys(characterUpdates).length > 0) {
       await this.prisma.character.update({ where: { id: character.id }, data: characterUpdates });
     }
 
-    // Update instance
     const outcome = {
       success,
       roll: Math.round(roll * 100) / 100,
@@ -271,9 +281,10 @@ export class OpportunitiesService {
       include: { definition: true },
     });
 
-    // Log activity
     if (character.playerId) {
-      const activityType = success ? this.resolveActivityType(definition.kind) : 'GIG_FAILED';
+      const activityType: ActivityType = success
+        ? this.resolveActivityType(definition.kind)
+        : 'GIG_FAILED';
       await this.prisma.activityLog.create({
         data: {
           playerId: character.playerId,
