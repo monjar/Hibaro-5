@@ -143,7 +143,7 @@ Running `npm run db:seed` creates:
 
 ### Test Player
 - Username: `test_player`
-- Default password: `changeme123` (override with `SEED_TEST_PLAYER_PASSWORD`)
+- Default password: `Heliora123` (override with `SEED_TEST_PLAYER_PASSWORD`)
 - Character: **Nova Rook**
 - Starting location: Antrolus / Arrival Yard / Arrival Processing Hub
 - Starting credits: 250
