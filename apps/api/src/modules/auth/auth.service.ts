@@ -59,7 +59,7 @@ export class AuthService {
       throw new ConflictException('A player with that username or email already exists');
     }
 
-    const passwordHash = await this.hashPassword(dto.password);
+    const passwordHash = await hashPassword(dto.password);
     const startingLocation = await this.resolveStartingLocation();
 
     const player = await this.prisma.$transaction(async (tx) => {
@@ -127,7 +127,7 @@ export class AuthService {
       include: { character: true },
     });
 
-    if (!player || !(await this.verifyPassword(dto.password, player.passwordHash))) {
+    if (!player || !(await verifyPassword(dto.password, player.passwordHash))) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -182,14 +182,6 @@ export class AuthService {
       districtId: startingBuilding.district.id,
       buildingId: startingBuilding.id,
     };
-  }
-
-  private async hashPassword(password: string) {
-    return hashPassword(password);
-  }
-
-  private async verifyPassword(password: string, passwordHash: string) {
-    return verifyPassword(password, passwordHash);
   }
 
   private async buildAuthResponse(player: {
