@@ -5,6 +5,7 @@ const PASSWORD_HASH_OPTIONS = {
   N: 32768,
   r: 8,
   p: 1,
+  maxmem: 64 * 1024 * 1024,
 } as const;
 
 export function hashPasswordSync(password: string) {
@@ -38,13 +39,19 @@ export async function verifyPassword(password: string, passwordHash: string) {
 
 function derivePasswordKey(password: string, salt: string) {
   return new Promise<Buffer>((resolve, reject) => {
-    scryptCallback(password, salt, PASSWORD_HASH_KEY_LENGTH, PASSWORD_HASH_OPTIONS, (error, derivedKey) => {
-      if (error) {
-        reject(error);
-        return;
-      }
+    scryptCallback(
+      password,
+      salt,
+      PASSWORD_HASH_KEY_LENGTH,
+      PASSWORD_HASH_OPTIONS,
+      (error, derivedKey) => {
+        if (error) {
+          reject(error);
+          return;
+        }
 
-      resolve(derivedKey as Buffer);
-    });
+        resolve(derivedKey as Buffer);
+      },
+    );
   });
 }
