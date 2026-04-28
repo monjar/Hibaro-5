@@ -22,6 +22,9 @@
       }
     ],
     "paths": {
+      "@heliora/platform-sdk": [
+        "../../packages/platform-sdk/src/index.ts"
+      ],
       "@/*": [
         "./src/*"
       ]

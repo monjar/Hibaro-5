@@ -1,10 +1,10 @@
-import { ActivityType } from '@prisma/client';
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ActivityType, RelationshipType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const STAT_XP_GAIN_PROBABILITY = 0.5;
@@ -35,7 +35,6 @@ export class OpportunitiesService {
       },
     });
 
-    // Filter out opportunities the character already has in progress
     const inProgress = await this.prisma.opportunityInstance.findMany({
       where: { characterId, status: { in: ['IN_PROGRESS', 'ACCEPTED'] } },
       select: { definitionId: true },
@@ -44,8 +43,6 @@ export class OpportunitiesService {
 
     return all.filter((opp) => {
       if (inProgressIds.has(opp.id)) return false;
-      // Check repeatability: if DAILY, check if done today
-      // Simplified: just return available
       return true;
     });
   }
@@ -76,7 +73,6 @@ export class OpportunitiesService {
       throw new ForbiddenException('You can only accept opportunities for your own character');
     }
 
-    // Check if already in progress
     const existing = await this.prisma.opportunityInstance.findFirst({
       where: {
         definitionId: opportunityId,
@@ -86,7 +82,6 @@ export class OpportunitiesService {
     });
     if (existing) throw new BadRequestException('Opportunity already in progress');
 
-    // Check requirements (basic)
     const requirements = definition.requirements as any[];
     for (const req of requirements) {
       if (req.type === 'STAT_MIN') {
@@ -109,7 +104,7 @@ export class OpportunitiesService {
     const now = new Date();
     const completesAt = definition.durationMinutes
       ? new Date(now.getTime() + definition.durationMinutes * 60 * 1000)
-      : new Date(now.getTime() + 60 * 60 * 1000); // default 1 hour
+      : new Date(now.getTime() + 60 * 60 * 1000);
 
     const instance = await this.prisma.opportunityInstance.create({
       data: {
@@ -122,7 +117,6 @@ export class OpportunitiesService {
       include: { definition: true },
     });
 
-    // Log activity
     if (character.playerId) {
       const activityType = this.acceptActivityType(definition.kind);
       await this.prisma.activityLog.create({
@@ -158,8 +152,13 @@ export class OpportunitiesService {
   async resolveInstanceInternal(instance: any) {
     const { definition, character } = instance;
     const now = new Date();
+    const relationshipChanges: Array<{
+      targetType: string;
+      targetId: string;
+      relationshipType: RelationshipType;
+      delta: number;
+    }> = [];
 
-    // Calculate success chance
     const successChance = this.calculateSuccessChance(character, definition);
     const roll = Math.random();
     const success = roll <= successChance;
@@ -172,7 +171,6 @@ export class OpportunitiesService {
     const characterUpdates: any = {};
 
     if (success) {
-      // Apply rewards
       for (const reward of rewards) {
         if (reward.type === 'CREDITS') {
           characterUpdates.credits = (character.credits || 0) + reward.value;
@@ -184,7 +182,6 @@ export class OpportunitiesService {
           }
           appliedRewards.push(reward);
         } else if (reward.type === 'FACTION_REPUTATION') {
-          // Update relationship
           await this.upsertRelationship(
             'CHARACTER',
             character.id,
@@ -193,6 +190,12 @@ export class OpportunitiesService {
             'REPUTATION',
             reward.value,
           );
+          relationshipChanges.push({
+            targetType: 'FACTION',
+            targetId: reward.factionId,
+            relationshipType: RelationshipType.REPUTATION,
+            delta: reward.value,
+          });
           appliedRewards.push(reward);
         } else if (reward.type === 'CORPORATION_REPUTATION') {
           await this.upsertRelationship(
@@ -203,11 +206,16 @@ export class OpportunitiesService {
             'REPUTATION',
             reward.value,
           );
+          relationshipChanges.push({
+            targetType: 'CORPORATION',
+            targetId: reward.corporationId,
+            relationshipType: RelationshipType.REPUTATION,
+            delta: reward.value,
+          });
           appliedRewards.push(reward);
         }
       }
     } else {
-      // Apply risks on failure
       for (const risk of risks) {
         const riskRoll = Math.random();
         if (riskRoll < (risk.probability ?? DEFAULT_RISK_PROBABILITY)) {
@@ -228,18 +236,38 @@ export class OpportunitiesService {
       }
     }
 
-    // Update character
     if (Object.keys(characterUpdates).length > 0) {
       await this.prisma.character.update({ where: { id: character.id }, data: characterUpdates });
     }
 
-    // Update instance
     const outcome = {
       success,
       roll: Math.round(roll * 100) / 100,
       successChance: Math.round(successChance * 100) / 100,
       appliedRewards,
       appliedRisks,
+      characterLedger: {
+        before: {
+          credits: character.credits,
+          health: character.health,
+          energy: character.energy,
+          wantedLevel: character.wantedLevel,
+        },
+        after: {
+          credits: characterUpdates.credits ?? character.credits,
+          health: characterUpdates.health ?? character.health,
+          energy: characterUpdates.energy ?? character.energy,
+          wantedLevel: characterUpdates.wantedLevel ?? character.wantedLevel,
+        },
+        delta: {
+          credits: (characterUpdates.credits ?? character.credits) - character.credits,
+          health: (characterUpdates.health ?? character.health) - character.health,
+          energy: (characterUpdates.energy ?? character.energy) - character.energy,
+          wantedLevel:
+            (characterUpdates.wantedLevel ?? character.wantedLevel) - character.wantedLevel,
+        },
+      },
+      relationshipChanges,
       resolvedAt: now.toISOString(),
     };
 
@@ -253,7 +281,6 @@ export class OpportunitiesService {
       include: { definition: true },
     });
 
-    // Log activity
     if (character.playerId) {
       const activityType: ActivityType = success
         ? this.resolveActivityType(definition.kind)

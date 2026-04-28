@@ -9,7 +9,7 @@ export class LoginDto {
   @MaxLength(100)
   identifier!: string;
 
-  @ApiProperty({ example: 'changeme123' })
+  @ApiProperty({ example: 'Heliora123' })
   @IsString()
   @MinLength(8)
   @MaxLength(128)

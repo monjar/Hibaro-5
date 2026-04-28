@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { hashPasswordSync } from './password-hash';
 
 const prisma = new PrismaClient();
-const TEST_PLAYER_PASSWORD = process.env.SEED_TEST_PLAYER_PASSWORD ?? 'changeme123';
+const TEST_PLAYER_PASSWORD = process.env.SEED_TEST_PLAYER_PASSWORD ?? 'Heliora123';
 
 async function main() {
   console.log('🌌 Seeding Heliora / Hibaro-5...');
@@ -137,7 +137,8 @@ async function main() {
       id: 'dist-teraluma-glasswater-central',
       planetId: teraluma.id,
       name: 'Glasswater Central',
-      description: 'The civic and commercial heart of Teraluma, governed by the Glasswater Civic Authority.',
+      description:
+        'The civic and commercial heart of Teraluma, governed by the Glasswater Civic Authority.',
       dangerLevel: 1,
       lawLevel: 8,
       economyLevel: 9,
@@ -238,7 +239,8 @@ async function main() {
       id: 'dist-valerina-blacksite-mire',
       planetId: valerina.id,
       name: 'Blacksite Mire',
-      description: 'A classified government zone suspected to house Blue Orchard Biotech experiments.',
+      description:
+        'A classified government zone suspected to house Blue Orchard Biotech experiments.',
       dangerLevel: 8,
       lawLevel: 9,
       economyLevel: 2,
@@ -348,8 +350,7 @@ async function main() {
     update: {},
     create: {
       name: 'Blue Orchard Biotech',
-      description:
-        'A medical and biotech corporation with classified projects on Valerina.',
+      description: 'A medical and biotech corporation with classified projects on Valerina.',
       industry: 'MEDICAL',
       cash: 3000000,
       debt: 2000000,
@@ -383,7 +384,9 @@ async function main() {
     },
   });
 
-  console.log('✅ Corporations: Pigeon Corporation, Helix Dynamics, Blue Orchard Biotech, SunSpoke Media');
+  console.log(
+    '✅ Corporations: Pigeon Corporation, Helix Dynamics, Blue Orchard Biotech, SunSpoke Media',
+  );
 
   // ==================== BUILDINGS ====================
   const startingStation = await prisma.building.upsert({
@@ -393,7 +396,8 @@ async function main() {
       id: 'bldg-antrolus-arrival-hub',
       districtId: arrivalYard.id,
       name: 'Arrival Processing Hub',
-      description: 'The central hub for new arrivals to Antrolus. Services, kiosks, and transit info.',
+      description:
+        'The central hub for new arrivals to Antrolus. Services, kiosks, and transit info.',
       ownerType: 'SYSTEM',
       functionality: ['HUB', 'DOCK'],
       status: 'OPEN',
@@ -420,7 +424,7 @@ async function main() {
     create: {
       id: 'bldg-antrolus-worker-bar',
       districtId: arrivalYard.id,
-      name: "Crank & Bolt Bar",
+      name: 'Crank & Bolt Bar',
       description: 'A rough worker bar. Rumors circulate freely here.',
       ownerType: 'SYSTEM',
       functionality: ['BAR'],
@@ -755,6 +759,224 @@ async function main() {
 
   console.log(`✅ Test player: test_player | Character: Nova Rook (id: ${novaRook.id})`);
 
+  const courierShade = await prisma.character.upsert({
+    where: { id: 'npc-courier-shade' },
+    update: {},
+    create: {
+      id: 'npc-courier-shade',
+      name: 'Courier Shade',
+      type: 'NPC',
+      currentPlanetId: antrolus.id,
+      currentDistrictId: arrivalYard.id,
+      currentBuildingId: startingStation.id,
+      credits: 180,
+      hacking: 7,
+      engineering: 6,
+      agility: 7,
+      charisma: 4,
+      stealth: 6,
+    },
+  });
+
+  const unionSpark = await prisma.character.upsert({
+    where: { id: 'npc-union-spark' },
+    update: {},
+    create: {
+      id: 'npc-union-spark',
+      name: 'Union Spark',
+      type: 'NPC',
+      currentPlanetId: antrolus.id,
+      currentDistrictId: arrivalYard.id,
+      currentBuildingId: startingStation.id,
+      credits: 95,
+      strength: 7,
+      engineering: 7,
+      charisma: 7,
+      stealth: 4,
+    },
+  });
+
+  const ghostVector = await prisma.character.upsert({
+    where: { id: 'npc-ghost-vector' },
+    update: {},
+    create: {
+      id: 'npc-ghost-vector',
+      name: 'Ghost Vector',
+      type: 'NPC',
+      currentPlanetId: teraluma.id,
+      currentDistrictId: glasswaterCentral.id,
+      credits: 140,
+      intelligence: 8,
+      hacking: 8,
+      stealth: 8,
+      charisma: 5,
+    },
+  });
+
+  await prisma.factionMembership.upsert({
+    where: {
+      factionId_characterId: {
+        factionId: coilUnion.id,
+        characterId: unionSpark.id,
+      },
+    },
+    update: {},
+    create: {
+      factionId: coilUnion.id,
+      characterId: unionSpark.id,
+      rankName: 'Organizer',
+      loyalty: 68,
+      reputation: 14,
+    },
+  });
+
+  await prisma.factionMembership.upsert({
+    where: {
+      factionId_characterId: {
+        factionId: valerinaGhosts.id,
+        characterId: ghostVector.id,
+      },
+    },
+    update: {},
+    create: {
+      factionId: valerinaGhosts.id,
+      characterId: ghostVector.id,
+      rankName: 'Whisper',
+      loyalty: 72,
+      reputation: 18,
+    },
+  });
+
+  await prisma.corporationEmployment.upsert({
+    where: {
+      corporationId_characterId: {
+        corporationId: pigeonCorp.id,
+        characterId: courierShade.id,
+      },
+    },
+    update: {},
+    create: {
+      corporationId: pigeonCorp.id,
+      characterId: courierShade.id,
+      role: 'Courier',
+      salary: 48,
+      rank: 'Route Specialist',
+    },
+  });
+
+  await prisma.relationship.upsert({
+    where: {
+      sourceType_sourceId_targetType_targetId_relationshipType: {
+        sourceType: 'CHARACTER',
+        sourceId: courierShade.id,
+        targetType: 'CORPORATION',
+        targetId: pigeonCorp.id,
+        relationshipType: 'LOYALTY',
+      },
+    },
+    update: { value: 18 },
+    create: {
+      sourceType: 'CHARACTER',
+      sourceId: courierShade.id,
+      targetType: 'CORPORATION',
+      targetId: pigeonCorp.id,
+      relationshipType: 'LOYALTY',
+      value: 18,
+    },
+  });
+
+  await prisma.relationship.upsert({
+    where: {
+      sourceType_sourceId_targetType_targetId_relationshipType: {
+        sourceType: 'CHARACTER',
+        sourceId: unionSpark.id,
+        targetType: 'FACTION',
+        targetId: coilUnion.id,
+        relationshipType: 'INFLUENCE',
+      },
+    },
+    update: { value: 12 },
+    create: {
+      sourceType: 'CHARACTER',
+      sourceId: unionSpark.id,
+      targetType: 'FACTION',
+      targetId: coilUnion.id,
+      relationshipType: 'INFLUENCE',
+      value: 12,
+    },
+  });
+
+  await prisma.relationship.upsert({
+    where: {
+      sourceType_sourceId_targetType_targetId_relationshipType: {
+        sourceType: 'CHARACTER',
+        sourceId: ghostVector.id,
+        targetType: 'FACTION',
+        targetId: valerinaGhosts.id,
+        relationshipType: 'TRUST',
+      },
+    },
+    update: { value: 16 },
+    create: {
+      sourceType: 'CHARACTER',
+      sourceId: ghostVector.id,
+      targetType: 'FACTION',
+      targetId: valerinaGhosts.id,
+      relationshipType: 'TRUST',
+      value: 16,
+    },
+  });
+
+  await prisma.activityLog.upsert({
+    where: { id: 'log-courier-shade-shift' },
+    update: {},
+    create: {
+      id: 'log-courier-shade-shift',
+      characterId: courierShade.id,
+      type: 'JOB_COMPLETED',
+      message: 'Courier Shade completed a priority route for Pigeon Corporation.',
+      relatedEntities: {
+        targetType: 'CORPORATION',
+        targetId: pigeonCorp.id,
+        targetName: pigeonCorp.name,
+      },
+    },
+  });
+
+  await prisma.activityLog.upsert({
+    where: { id: 'log-union-spark-rally' },
+    update: {},
+    create: {
+      id: 'log-union-spark-rally',
+      characterId: unionSpark.id,
+      type: 'RELATIONSHIP_CHANGED',
+      message: 'Union Spark rallied dock workers for the Coil Union.',
+      relatedEntities: {
+        targetType: 'FACTION',
+        targetId: coilUnion.id,
+        targetName: coilUnion.name,
+      },
+    },
+  });
+
+  await prisma.activityLog.upsert({
+    where: { id: 'log-ghost-vector-whisper' },
+    update: {},
+    create: {
+      id: 'log-ghost-vector-whisper',
+      characterId: ghostVector.id,
+      type: 'WORLD_EVENT_TRIGGERED',
+      message: 'Ghost Vector seeded a rumor network across Valerina.',
+      relatedEntities: {
+        targetType: 'FACTION',
+        targetId: valerinaGhosts.id,
+        targetName: valerinaGhosts.name,
+      },
+    },
+  });
+
+  console.log('✅ NPC actors: Courier Shade, Union Spark, Ghost Vector');
+
   // ==================== OPPORTUNITY DEFINITIONS ====================
 
   // GIG 1: Move the Medical Crates
@@ -830,7 +1052,8 @@ async function main() {
     create: {
       id: 'opp-furnace-worker-shift',
       title: 'Worker Shift at Furnace Row',
-      description: 'A standard labor shift at the Helix Dynamics refineries. Hard work, steady pay.',
+      description:
+        'A standard labor shift at the Helix Dynamics refineries. Hard work, steady pay.',
       kind: 'JOB',
       postedByType: 'CORPORATION',
       postedById: helixDynamics.id,
@@ -880,7 +1103,8 @@ async function main() {
     create: {
       id: 'opp-quest-welcome-antrolus',
       title: 'Welcome to Antrolus',
-      description: 'Get your bearings. Complete your first gig on Antrolus and prove you can survive.',
+      description:
+        'Get your bearings. Complete your first gig on Antrolus and prove you can survive.',
       kind: 'QUEST',
       postedByType: 'SYSTEM',
       type: 'STORY',
@@ -948,9 +1172,7 @@ async function main() {
       scope: 'PLANET',
       affectedEntities: [{ type: 'PLANET', id: antrolus.id }],
       requirements: [],
-      effects: [
-        { type: 'MODIFY_RISK', target: 'SMUGGLING', modifier: 0.2 },
-      ],
+      effects: [{ type: 'MODIFY_RISK', target: 'SMUGGLING', modifier: 0.2 }],
       startsAt: now,
       endsAt: in24h,
       status: 'ACTIVE',
@@ -968,9 +1190,7 @@ async function main() {
       scope: 'DISTRICT',
       affectedEntities: [{ type: 'DISTRICT', id: fulfilmentCore.id }],
       requirements: [],
-      effects: [
-        { type: 'MODIFY_REWARD', target: 'DELIVERY', modifier: -0.1 },
-      ],
+      effects: [{ type: 'MODIFY_REWARD', target: 'DELIVERY', modifier: -0.1 }],
       startsAt: now,
       endsAt: in48h,
       status: 'ACTIVE',
@@ -988,9 +1208,7 @@ async function main() {
       scope: 'DISTRICT',
       affectedEntities: [{ type: 'DISTRICT', id: crookedMarina.id }],
       requirements: [],
-      effects: [
-        { type: 'MODIFY_DANGER', target: crookedMarina.id, modifier: 2 },
-      ],
+      effects: [{ type: 'MODIFY_DANGER', target: crookedMarina.id, modifier: 2 }],
       startsAt: in24h,
       endsAt: in48h,
       status: 'SCHEDULED',
@@ -1008,9 +1226,7 @@ async function main() {
       scope: 'DISTRICT',
       affectedEntities: [{ type: 'DISTRICT', id: blacksiteMire.id }],
       requirements: [],
-      effects: [
-        { type: 'SPAWN_EVENT', eventId: 'event-ghost-investigation' },
-      ],
+      effects: [{ type: 'SPAWN_EVENT', eventId: 'event-ghost-investigation' }],
       startsAt: in48h,
       status: 'SCHEDULED',
     },
@@ -1027,9 +1243,7 @@ async function main() {
       scope: 'PLANET',
       affectedEntities: [{ type: 'PLANET', id: teraluma.id }],
       requirements: [],
-      effects: [
-        { type: 'MODIFY_ECONOMY', target: teraluma.id, modifier: 0.15 },
-      ],
+      effects: [{ type: 'MODIFY_ECONOMY', target: teraluma.id, modifier: 0.15 }],
       startsAt: in24h,
       endsAt: in48h,
       status: 'SCHEDULED',
