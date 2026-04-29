@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, RelationshipType } from '@prisma/client';
 import { REALTIME_EVENT_CONTRACTS } from '@heliora/platform-sdk';
+import { computeNextStockPrice } from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
+import { JobsService } from '../jobs/jobs.service';
 import { clampWorldMetric, deriveCorporationStatus } from './simulation.utils';
 
 @Injectable()
@@ -10,6 +12,7 @@ export class SimulationService {
   constructor(
     private prisma: PrismaService,
     private opportunitiesService: OpportunitiesService,
+    private jobsService: JobsService,
   ) {}
 
   async tick() {
@@ -21,6 +24,7 @@ export class SimulationService {
     const corporations = await this.advanceCorporations();
     const districtControl = await this.buildDistrictControlState();
     const npcActivity = await this.processNpcActivity(now);
+    const jobShifts = await this.jobsService.processStrikes(now);
 
     const stepSummaries = [
       {
@@ -62,6 +66,16 @@ export class SimulationService {
         notes: npcActivity.actions.length
           ? ['Logged notable NPC actions']
           : ['No NPC actors available'],
+      },
+      {
+        step: 'job_shifts' as const,
+        processed: jobShifts.evaluated,
+        changes: jobShifts.struck,
+        notes: [
+          `${jobShifts.struck} strike(s) issued`,
+          `${jobShifts.fired} fired`,
+          `${jobShifts.total} total active`,
+        ],
       },
     ];
 
@@ -387,16 +401,6 @@ export class SimulationService {
           1,
         ).toFixed(2),
       );
-      const stockPrice = Number(
-        Math.max(
-          5,
-          (corporation.stockPrice ?? 40) +
-            planetEconomyIndex -
-            activeEventPressure * 1.5 +
-            employmentCount * 0.75 -
-            riskOfBankruptcy * 6,
-        ).toFixed(2),
-      );
       const stockVolatility = Number(
         clampWorldMetric(
           0.12 + activeEventPressure * 0.08 + riskOfBankruptcy * 0.2,
@@ -404,6 +408,20 @@ export class SimulationService {
           1,
         ).toFixed(2),
       );
+
+      const drift =
+        planetEconomyIndex * 0.4 -
+        activeEventPressure * 1.5 +
+        employmentCount * 0.4 -
+        riskOfBankruptcy * 5;
+
+      const move = computeNextStockPrice({
+        currentPrice: corporation.stockPrice ?? 40,
+        volatility: stockVolatility,
+        drift,
+      });
+      const stockPrice = move.nextPrice;
+
       const status = deriveCorporationStatus(riskOfBankruptcy, cash, debt);
 
       updated += 1;
@@ -419,13 +437,34 @@ export class SimulationService {
           status,
         },
       });
+      await this.prisma.stockPriceHistory.create({
+        data: { corporationId: corporation.id, price: stockPrice },
+      });
     }
+
+    // Trim history to 200 most recent rows per corporation to avoid unbounded growth.
+    await this.trimStockPriceHistory(200);
 
     return {
       processed: corporations.length,
       updated,
       notes: ['Applied price movement rules and bankruptcy pressure'],
     };
+  }
+
+  private async trimStockPriceHistory(keepPerCorporation: number) {
+    const corporations = await this.prisma.corporation.findMany({ select: { id: true } });
+    for (const { id } of corporations) {
+      const all = await this.prisma.stockPriceHistory.findMany({
+        where: { corporationId: id },
+        orderBy: { recordedAt: 'desc' },
+        select: { id: true },
+      });
+      const stale = all.slice(keepPerCorporation).map((row) => row.id);
+      if (stale.length > 0) {
+        await this.prisma.stockPriceHistory.deleteMany({ where: { id: { in: stale } } });
+      }
+    }
   }
 
   private async buildDistrictControlState() {

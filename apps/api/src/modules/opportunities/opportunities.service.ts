@@ -4,18 +4,116 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ActivityType, RelationshipType } from '@prisma/client';
+import { ActivityType, OpportunityType, RelationshipType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { JobsService } from '../jobs/jobs.service';
 
 const STAT_XP_GAIN_PROBABILITY = 0.5;
 const DEFAULT_RISK_PROBABILITY = 0.3;
 
+export interface AdminOpportunityInput {
+  title: string;
+  description?: string | null;
+  kind: 'GIG' | 'JOB' | 'QUEST';
+  type: string;
+  difficulty?: number;
+  durationMinutes?: number;
+  requirements?: unknown[];
+  rewards?: unknown[];
+  risks?: unknown[];
+  repeatability?: unknown;
+}
+
 @Injectable()
 export class OpportunitiesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jobs: JobsService,
+  ) {}
 
   async findAll() {
     return this.prisma.opportunityDefinition.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  async findOne(id: string) {
+    const def = await this.prisma.opportunityDefinition.findUnique({ where: { id } });
+    if (!def) throw new NotFoundException(`Opportunity ${id} not found`);
+    return def;
+  }
+
+  async createDefinition(data: AdminOpportunityInput) {
+    this.validateAdminInput(data);
+    return this.prisma.opportunityDefinition.create({
+      data: {
+        title: data.title,
+        description: data.description ?? null,
+        kind: data.kind,
+        type: data.type as OpportunityType,
+        difficulty: data.difficulty ?? 1,
+        durationMinutes: data.durationMinutes ?? 60,
+        requirements: (data.requirements ?? []) as never,
+        rewards: (data.rewards ?? []) as never,
+        risks: (data.risks ?? []) as never,
+        repeatability: (data.repeatability ?? null) as never,
+      },
+    });
+  }
+
+  async updateDefinition(id: string, data: Partial<AdminOpportunityInput>) {
+    await this.findOne(id);
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('No fields to update');
+    }
+    return this.prisma.opportunityDefinition.update({
+      where: { id },
+      data: {
+        ...(data.title !== undefined ? { title: data.title } : {}),
+        ...(data.description !== undefined ? { description: data.description } : {}),
+        ...(data.kind !== undefined ? { kind: data.kind } : {}),
+        ...(data.type !== undefined ? { type: data.type as OpportunityType } : {}),
+        ...(data.difficulty !== undefined ? { difficulty: data.difficulty } : {}),
+        ...(data.durationMinutes !== undefined ? { durationMinutes: data.durationMinutes } : {}),
+        ...(data.requirements !== undefined
+          ? { requirements: data.requirements as never }
+          : {}),
+        ...(data.rewards !== undefined ? { rewards: data.rewards as never } : {}),
+        ...(data.risks !== undefined ? { risks: data.risks as never } : {}),
+        ...(data.repeatability !== undefined
+          ? { repeatability: (data.repeatability ?? null) as never }
+          : {}),
+      },
+    });
+  }
+
+  async deleteDefinition(id: string) {
+    await this.findOne(id);
+    const inFlight = await this.prisma.opportunityInstance.count({
+      where: { definitionId: id, status: { in: ['IN_PROGRESS', 'ACCEPTED'] } },
+    });
+    if (inFlight > 0) {
+      throw new BadRequestException(
+        `Cannot delete: ${inFlight} instance(s) still in progress. Resolve or fail them first.`,
+      );
+    }
+    await this.prisma.opportunityInstance.deleteMany({ where: { definitionId: id } });
+    await this.prisma.jobEmployment.deleteMany({ where: { opportunityId: id } });
+    await this.prisma.opportunityDefinition.delete({ where: { id } });
+    return { deleted: true, id };
+  }
+
+  private validateAdminInput(input: AdminOpportunityInput) {
+    if (!input.title || input.title.trim().length < 3) {
+      throw new BadRequestException('Title must be at least 3 characters');
+    }
+    if (!['GIG', 'JOB', 'QUEST'].includes(input.kind)) {
+      throw new BadRequestException('Kind must be GIG, JOB, or QUEST');
+    }
+    if (input.difficulty !== undefined && (input.difficulty < 1 || input.difficulty > 10)) {
+      throw new BadRequestException('Difficulty must be between 1 and 10');
+    }
+    if (input.durationMinutes !== undefined && input.durationMinutes < 1) {
+      throw new BadRequestException('durationMinutes must be at least 1');
+    }
   }
 
   async findAvailableForCharacter(characterId: string, playerId: string) {
@@ -73,14 +171,30 @@ export class OpportunitiesService {
       throw new ForbiddenException('You can only accept opportunities for your own character');
     }
 
-    const existing = await this.prisma.opportunityInstance.findFirst({
+    const activeAny = await this.prisma.opportunityInstance.findFirst({
       where: {
-        definitionId: opportunityId,
         characterId,
         status: { in: ['IN_PROGRESS', 'ACCEPTED'] },
       },
+      include: { definition: { select: { title: true } } },
     });
-    if (existing) throw new BadRequestException('Opportunity already in progress');
+    if (activeAny) {
+      if (activeAny.definitionId === opportunityId) {
+        throw new BadRequestException('Opportunity already in progress');
+      }
+      throw new BadRequestException(
+        `You already have an activity in progress: ${activeAny.definition.title}. Finish or fail it before accepting another.`,
+      );
+    }
+
+    if (definition.kind === 'JOB') {
+      const employment = await this.jobs.findActiveEmployment(characterId, opportunityId);
+      if (!employment || employment.status !== 'ACTIVE') {
+        throw new BadRequestException(
+          `You are not employed at ${definition.title}. Get hired before working a shift.`,
+        );
+      }
+    }
 
     const requirements = definition.requirements as any[];
     for (const req of requirements) {
@@ -280,6 +394,14 @@ export class OpportunitiesService {
       },
       include: { definition: true },
     });
+
+    if (definition.kind === 'JOB' && success) {
+      const employment = await this.jobs.findActiveEmployment(character.id, definition.id);
+      if (employment && employment.status === 'ACTIVE') {
+        const creditsEarned = outcome.characterLedger.delta.credits;
+        await this.jobs.markShiftCompleted(employment.id, creditsEarned);
+      }
+    }
 
     if (character.playerId) {
       const activityType: ActivityType = success

@@ -53,6 +53,14 @@ export default async function AdminPage() {
             Inspect economy drift, corporation volatility, district control pressure, NPC actions,
             and the shared realtime contracts that future transports must honor.
           </p>
+          <nav className="mt-4 flex gap-2">
+            <a
+              href="/opportunities"
+              className="rounded border border-heliora-cyan/60 bg-heliora-cyan/10 px-4 py-2 text-sm font-bold text-heliora-cyan hover:bg-heliora-cyan/20"
+            >
+              MANAGE OPPORTUNITIES →
+            </a>
+          </nav>
         </header>
 
         <section className="grid gap-4 md:grid-cols-4">

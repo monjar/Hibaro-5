@@ -183,6 +183,11 @@ enum ActivityType {
   GIG_FAILED
   JOB_ACCEPTED
   JOB_COMPLETED
+  JOB_FAILED
+  JOB_HIRED
+  JOB_FIRED
+  JOB_QUIT
+  JOB_STRIKE
   QUEST_STARTED
   QUEST_COMPLETED
   ITEM_BOUGHT
@@ -193,6 +198,12 @@ enum ActivityType {
   WORLD_EVENT_TRIGGERED
   RELATIONSHIP_CHANGED
   LOCATION_CHANGED
+}
+
+enum JobEmploymentStatus {
+  ACTIVE
+  FIRED
+  QUIT
 }
 
 // ==================== MODELS ====================
@@ -243,6 +254,8 @@ model Character {
   itemInstances          ItemInstance[]
   opportunityInstances   OpportunityInstance[]
   activityLogs           ActivityLog[]
+  stockHoldings          StockHolding[]
+  jobEmployments         JobEmployment[]
 }
 
 model SolarSystem {
@@ -346,7 +359,23 @@ model Corporation {
   stockPrice             Float?
   stockVolatility        Float?
 
-  employments CorporationEmployment[]
+  employments   CorporationEmployment[]
+  stockHoldings StockHolding[]
+  priceHistory  StockPriceHistory[]
+}
+
+model StockHolding {
+  id            String   @id @default(uuid())
+  characterId   String
+  character     Character @relation(fields: [characterId], references: [id])
+  corporationId String
+  corporation   Corporation @relation(fields: [corporationId], references: [id])
+  shares        Int      @default(0)
+  averagePrice  Float    @default(0)
+  acquiredAt    DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([characterId, corporationId])
 }
 
 model CorporationEmployment {
@@ -416,7 +445,27 @@ model OpportunityDefinition {
   endsAvailableAt   DateTime?
   createdAt         DateTime                @default(now())
 
-  instances OpportunityInstance[]
+  instances     OpportunityInstance[]
+  employments   JobEmployment[]
+}
+
+model JobEmployment {
+  id                    String                @id @default(uuid())
+  characterId           String
+  character             Character             @relation(fields: [characterId], references: [id])
+  opportunityId         String
+  opportunity           OpportunityDefinition @relation(fields: [opportunityId], references: [id])
+  hiredAt               DateTime              @default(now())
+  lastShiftAt           DateTime              @default(now())
+  strikes               Int                   @default(0)
+  status                JobEmploymentStatus   @default(ACTIVE)
+  cadenceHours          Int                   @default(24)
+  totalShiftsCompleted  Int                   @default(0)
+  totalCreditsEarned    Float                 @default(0)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@unique([characterId, opportunityId])
 }
 
 model OpportunityInstance {
@@ -474,6 +523,16 @@ model ActivityLog {
   relatedEntities Json?
   metadata        Json?
   createdAt       DateTime     @default(now())
+}
+
+model StockPriceHistory {
+  id            String      @id @default(uuid())
+  corporationId String
+  corporation   Corporation @relation(fields: [corporationId], references: [id])
+  price         Float
+  recordedAt    DateTime    @default(now())
+
+  @@index([corporationId, recordedAt])
 }
 
 model SimulationTick {

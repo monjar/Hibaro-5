@@ -51,4 +51,30 @@ export class CharactersController {
   ) {
     return this.charactersService.travel(id, player.sub, body);
   }
+
+  @Post(':id/travel/quote')
+  @ApiOperation({ summary: 'Quote the cost and risk of travel without committing' })
+  travelQuote(
+    @Param('id') id: string,
+    @CurrentPlayer() player: AuthenticatedPlayer,
+    @Body() body: { planetId?: string; districtId?: string; buildingId?: string },
+  ) {
+    return this.charactersService.travelQuote(id, player.sub, body);
+  }
+
+  @Post(':id/rest')
+  @ApiOperation({ summary: 'Rest at the current building (safehouse, clinic, or hub) for recovery' })
+  rest(@Param('id') id: string, @CurrentPlayer() player: AuthenticatedPlayer) {
+    return this.charactersService.rest(id, player.sub);
+  }
+
+  @Post(':id/items/:itemInstanceId/use')
+  @ApiOperation({ summary: 'Consume an item from inventory' })
+  useItem(
+    @Param('id') id: string,
+    @Param('itemInstanceId') itemInstanceId: string,
+    @CurrentPlayer() player: AuthenticatedPlayer,
+  ) {
+    return this.charactersService.useItem(id, player.sub, itemInstanceId);
+  }
 }

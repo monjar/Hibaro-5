@@ -1,5 +1,26 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsEmail,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
+
+const VALID_BACKSTORIES = [
+  'EX_SOLDIER',
+  'SMUGGLER',
+  'CORPORATE_DRONE',
+  'STREET_HACKER',
+  'DRIFTER',
+];
 
 export class RegisterDto {
   @ApiProperty({ example: 'test_player' })
@@ -32,4 +53,42 @@ export class RegisterDto {
   @MinLength(3)
   @MaxLength(80)
   characterName!: string;
+
+  @ApiPropertyOptional({
+    example: 'DRIFTER',
+    enum: VALID_BACKSTORIES,
+    description: 'Backstory archetype that grants starting stat bonuses and credits',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(VALID_BACKSTORIES)
+  backstory?: string;
+
+  @ApiPropertyOptional({
+    example: 'I came here looking for my brother.',
+    description: 'Free-form motivation: why is this character on Hibaro-5?',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  motivation?: string;
+
+  @ApiPropertyOptional({
+    description: 'Optional stat point allocation. Each key 0-8, total must not exceed 12.',
+    example: { hacking: 4, intelligence: 4, stealth: 4 },
+  })
+  @IsOptional()
+  @IsObject()
+  statAllocation?: StatAllocationDto;
+}
+
+export class StatAllocationDto {
+  @IsOptional() @IsInt() @Min(0) @Max(8) strength?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) agility?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) intelligence?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) charisma?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) hacking?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) combat?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) stealth?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) engineering?: number;
 }

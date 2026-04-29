@@ -1,9 +1,18 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthenticatedPlayer } from '../auth/auth.service';
 import { CurrentPlayer } from '../auth/current-player.decorator';
-import { OpportunitiesService } from './opportunities.service';
+import { AdminOpportunityInput, OpportunitiesService } from './opportunities.service';
 
 @ApiTags('opportunities')
 @Controller('opportunities')
@@ -38,6 +47,18 @@ export class OpportunitiesController {
     return this.opportunitiesService.findInstancesForCharacter(characterId, player.sub);
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Get one opportunity definition' })
+  findOne(@Param('id') id: string) {
+    return this.opportunitiesService.findOne(id);
+  }
+
+  @Post()
+  @ApiOperation({ summary: 'Create a new opportunity definition (admin)' })
+  create(@Body() body: AdminOpportunityInput) {
+    return this.opportunitiesService.createDefinition(body);
+  }
+
   @Post(':opportunityId/accept')
   @ApiOperation({ summary: 'Accept an opportunity' })
   @ApiBearerAuth()
@@ -56,5 +77,17 @@ export class OpportunitiesController {
   @UseGuards(AuthGuard)
   resolve(@Param('instanceId') instanceId: string, @CurrentPlayer() player: AuthenticatedPlayer) {
     return this.opportunitiesService.resolveInstance(instanceId, player.sub);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update an opportunity definition (admin)' })
+  update(@Param('id') id: string, @Body() body: Partial<AdminOpportunityInput>) {
+    return this.opportunitiesService.updateDefinition(id, body);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete an opportunity definition (admin)' })
+  remove(@Param('id') id: string) {
+    return this.opportunitiesService.deleteDefinition(id);
   }
 }

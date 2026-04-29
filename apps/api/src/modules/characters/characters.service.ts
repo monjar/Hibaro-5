@@ -86,6 +86,207 @@ export class CharactersService {
     return character;
   }
 
+  async travelQuote(
+    id: string,
+    playerId: string,
+    dto: { planetId?: string; districtId?: string; buildingId?: string },
+  ) {
+    const character = await this.findById(id, playerId);
+    const destinationPlanetId = dto.planetId ?? character.currentPlanetId;
+    const destinationDistrictId = dto.districtId ?? character.currentDistrictId;
+
+    if (!destinationPlanetId || !destinationDistrictId) {
+      throw new BadRequestException('Travel quote requires a destination planet and district');
+    }
+
+    const [destinationPlanet, destinationDistrict] = await Promise.all([
+      this.prisma.planet.findUnique({ where: { id: destinationPlanetId } }),
+      this.prisma.district.findUnique({
+        where: { id: destinationDistrictId },
+        include: { planet: true },
+      }),
+    ]);
+    if (!destinationPlanet) throw new NotFoundException('Planet not found');
+    if (!destinationDistrict) throw new NotFoundException('District not found');
+    if (destinationDistrict.planetId !== destinationPlanet.id) {
+      throw new BadRequestException('District does not belong to the requested planet');
+    }
+
+    const travel = assessTravel({
+      samePlanet: character.currentPlanetId === destinationPlanet.id,
+      sameDistrict: character.currentDistrictId === destinationDistrict.id,
+      destinationPlanetDanger: destinationPlanet.dangerLevel,
+      destinationPlanetLaw: destinationPlanet.lawLevel,
+      destinationDistrictDanger: destinationDistrict.dangerLevel,
+      destinationDistrictLaw: destinationDistrict.lawLevel,
+      destinationDistrictEconomy: destinationDistrict.economyLevel,
+      currentDistrictDanger: character.currentDistrict?.dangerLevel,
+    });
+
+    return {
+      ...travel,
+      destination: {
+        planetId: destinationPlanet.id,
+        planetName: destinationPlanet.name,
+        districtId: destinationDistrict.id,
+        districtName: destinationDistrict.name,
+        buildingId: dto.buildingId ?? null,
+      },
+      affordable: character.credits >= travel.travelCost,
+      currentCredits: character.credits,
+    };
+  }
+
+  async rest(id: string, playerId: string) {
+    const character = await this.findById(id, playerId);
+
+    const building = character.currentBuildingId
+      ? await this.prisma.building.findUnique({ where: { id: character.currentBuildingId } })
+      : null;
+    if (!building) {
+      throw new BadRequestException('You must be inside a building to rest');
+    }
+    const fnArr = Array.isArray(building.functionality) ? (building.functionality as string[]) : [];
+    const isSafe = fnArr.includes('SAFEHOUSE') || fnArr.includes('CLINIC') || fnArr.includes('HUB');
+    if (!isSafe) {
+      throw new BadRequestException(
+        `${building.name} is not somewhere you can rest (need a safehouse, clinic, or hub)`,
+      );
+    }
+
+    const isClinic = fnArr.includes('CLINIC');
+    const isSafehouse = fnArr.includes('SAFEHOUSE');
+
+    const energyRecover = isSafehouse ? 60 : isClinic ? 30 : 25;
+    const healthRecover = isClinic ? 60 : isSafehouse ? 25 : 10;
+    const cost = isClinic ? 80 : isSafehouse ? 30 : 15;
+
+    if (character.credits < cost) {
+      throw new BadRequestException(
+        `Resting here costs ${cost} credits (you have ${character.credits})`,
+      );
+    }
+
+    const newEnergy = Math.min(character.maxEnergy, character.energy + energyRecover);
+    const newHealth = Math.min(character.maxHealth, character.health + healthRecover);
+    const newWanted = isSafehouse
+      ? Math.max(0, character.wantedLevel - 1)
+      : character.wantedLevel;
+
+    const updated = await this.prisma.character.update({
+      where: { id },
+      data: {
+        credits: character.credits - cost,
+        energy: newEnergy,
+        health: newHealth,
+        wantedLevel: newWanted,
+      },
+      include: { currentPlanet: true, currentDistrict: true, currentBuilding: true },
+    });
+
+    if (character.playerId) {
+      await this.prisma.activityLog.create({
+        data: {
+          playerId: character.playerId,
+          characterId: id,
+          type: 'BUILDING_ENTERED',
+          message: `${character.name} rested at ${building.name} (+${newEnergy - character.energy} EN, +${newHealth - character.health} HP)`,
+          relatedEntities: {
+            buildingId: building.id,
+            energyDelta: newEnergy - character.energy,
+            healthDelta: newHealth - character.health,
+            cost,
+            wantedDelta: newWanted - character.wantedLevel,
+          },
+        },
+      });
+    }
+
+    return {
+      character: updated,
+      restedAt: building.name,
+      energyRecovered: newEnergy - character.energy,
+      healthRecovered: newHealth - character.health,
+      cost,
+      wantedDelta: newWanted - character.wantedLevel,
+    };
+  }
+
+  async useItem(id: string, playerId: string, itemInstanceId: string) {
+    const character = await this.findById(id, playerId);
+
+    const item = await this.prisma.itemInstance.findUnique({
+      where: { id: itemInstanceId },
+      include: { itemDefinition: true },
+    });
+    if (!item) throw new NotFoundException(`Item ${itemInstanceId} not found`);
+    if (item.ownerType !== 'CHARACTER' || item.ownerId !== id) {
+      throw new BadRequestException('You do not own this item');
+    }
+    if (item.itemDefinition.category !== 'CONSUMABLE') {
+      throw new BadRequestException('Only consumables can be used');
+    }
+
+    const effects = (item.itemDefinition.effects as Array<Record<string, unknown>>) ?? [];
+    if (!Array.isArray(effects) || effects.length === 0) {
+      throw new BadRequestException('Item has no effects');
+    }
+
+    const updates: Record<string, number> = {};
+    const applied: Array<{ stat: string; value: number }> = [];
+
+    for (const effect of effects) {
+      if (effect.type === 'MODIFY_STAT' && typeof effect.key === 'string') {
+        const key = effect.key;
+        const value = typeof effect.value === 'number' ? effect.value : 0;
+        if (key === 'health') {
+          updates.health = Math.min(
+            character.maxHealth,
+            Math.max(0, character.health + value),
+          );
+          applied.push({ stat: 'health', value });
+        } else if (key === 'energy') {
+          updates.energy = Math.min(
+            character.maxEnergy,
+            Math.max(0, character.energy + value),
+          );
+          applied.push({ stat: 'energy', value });
+        } else if (key === 'wantedLevel') {
+          updates.wantedLevel = Math.max(0, character.wantedLevel + value);
+          applied.push({ stat: 'wantedLevel', value });
+        }
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.character.update({ where: { id }, data: updates }),
+      this.prisma.itemInstance.delete({ where: { id: item.id } }),
+      ...(character.playerId
+        ? [
+            this.prisma.activityLog.create({
+              data: {
+                playerId: character.playerId,
+                characterId: id,
+                type: 'ITEM_BOUGHT',
+                message: `${character.name} used ${item.itemDefinition.name}`,
+                relatedEntities: {
+                  itemId: item.id,
+                  itemName: item.itemDefinition.name,
+                  applied,
+                } as unknown as Prisma.JsonObject,
+              },
+            }),
+          ]
+        : []),
+    ]);
+
+    return {
+      success: true,
+      itemUsed: item.itemDefinition.name,
+      applied,
+    };
+  }
+
   async travel(
     id: string,
     playerId: string,

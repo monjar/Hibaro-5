@@ -520,6 +520,20 @@ async function main() {
     },
   });
 
+  const generalStore = await prisma.building.upsert({
+    where: { id: 'bldg-antrolus-general-store' },
+    update: {},
+    create: {
+      id: 'bldg-antrolus-general-store',
+      districtId: arrivalYard.id,
+      name: 'Arrivals Provisions',
+      description: 'A licensed general store catering to new arrivals.',
+      ownerType: 'SYSTEM',
+      functionality: ['SHOP'],
+      status: 'OPEN',
+    },
+  });
+
   // Update faction headquarters
   await prisma.faction.update({
     where: { id: redMarket.id },
@@ -543,7 +557,7 @@ async function main() {
     data: { controllingFactionId: glasswaterCivicAuthority.id },
   });
 
-  console.log('✅ Buildings: 9 buildings on Antrolus');
+  console.log('✅ Buildings: 10 buildings on Antrolus');
 
   // ==================== ITEM DEFINITIONS ====================
   const rustyPulsePistol = await prisma.itemDefinition.upsert({
@@ -671,6 +685,59 @@ async function main() {
 
   console.log('✅ Item definitions: 9 items');
 
+  // ==================== SHOP INVENTORIES ====================
+  type ShopSeed = {
+    buildingId: string;
+    itemDefinitionId: string;
+    priceCredits: number;
+    contraband?: boolean;
+    condition?: number;
+  };
+
+  const shopSeeds: ShopSeed[] = [
+    // Arrivals Provisions (legal general store)
+    { buildingId: generalStore.id, itemDefinitionId: medicalPatch.id, priceCredits: 45 },
+    { buildingId: generalStore.id, itemDefinitionId: medicalPatch.id, priceCredits: 45 },
+    { buildingId: generalStore.id, itemDefinitionId: medicalPatch.id, priceCredits: 45 },
+    { buildingId: generalStore.id, itemDefinitionId: workerJacket.id, priceCredits: 35, condition: 90 },
+    { buildingId: generalStore.id, itemDefinitionId: cheapHackingDeck.id, priceCredits: 110 },
+    { buildingId: generalStore.id, itemDefinitionId: antrolusTransitPass.id, priceCredits: 12 },
+    { buildingId: generalStore.id, itemDefinitionId: brokenDronePart.id, priceCredits: 18 },
+    // Furnace Row Underground (black market)
+    { buildingId: blackMarket.id, itemDefinitionId: rustyPulsePistol.id, priceCredits: 75, contraband: true, condition: 60 },
+    { buildingId: blackMarket.id, itemDefinitionId: smugglerToolkit.id, priceCredits: 220, contraband: true },
+    { buildingId: blackMarket.id, itemDefinitionId: cheapHackingDeck.id, priceCredits: 95, condition: 80 },
+    { buildingId: blackMarket.id, itemDefinitionId: corporateAccessCard.id, priceCredits: 350, contraband: true },
+    { buildingId: blackMarket.id, itemDefinitionId: medicalPatch.id, priceCredits: 50 },
+    // Arrivals Clinic (medical only)
+    { buildingId: clinic.id, itemDefinitionId: medicalPatch.id, priceCredits: 35 },
+    { buildingId: clinic.id, itemDefinitionId: medicalPatch.id, priceCredits: 35 },
+  ];
+
+  // Only seed shop inventory if shops appear empty (idempotent on re-seed)
+  for (const buildingId of [generalStore.id, blackMarket.id, clinic.id]) {
+    const existing = await prisma.itemInstance.count({
+      where: { ownerType: 'BUILDING', ownerId: buildingId },
+    });
+    if (existing > 0) continue;
+    const seedsForBuilding = shopSeeds.filter((s) => s.buildingId === buildingId);
+    for (const seed of seedsForBuilding) {
+      await prisma.itemInstance.create({
+        data: {
+          itemDefinitionId: seed.itemDefinitionId,
+          ownerType: 'BUILDING',
+          ownerId: seed.buildingId,
+          condition: seed.condition ?? 100,
+          modifiers: {
+            priceCredits: seed.priceCredits,
+            contraband: seed.contraband === true,
+          },
+        },
+      });
+    }
+  }
+  console.log('✅ Shop inventories seeded for 3 shops');
+
   // ==================== SEED PLAYER & CHARACTER ====================
   const testPlayer = await prisma.player.upsert({
     where: { username: 'test_player' },
@@ -754,6 +821,23 @@ async function main() {
       type: 'LOGIN',
       message: 'Nova Rook arrived at Antrolus Arrival Yard.',
       relatedEntities: { planetId: antrolus.id, districtId: arrivalYard.id },
+    },
+  });
+
+  // Give Nova Rook a small starter stock holding
+  await prisma.stockHolding.upsert({
+    where: {
+      characterId_corporationId: {
+        characterId: novaRook.id,
+        corporationId: pigeonCorp.id,
+      },
+    },
+    update: {},
+    create: {
+      characterId: novaRook.id,
+      corporationId: pigeonCorp.id,
+      shares: 2,
+      averagePrice: pigeonCorp.stockPrice ?? 0,
     },
   });
 

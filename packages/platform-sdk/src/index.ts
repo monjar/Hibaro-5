@@ -6,7 +6,8 @@ export type SimulationStepName =
   | 'economy'
   | 'corporations'
   | 'district_control'
-  | 'npc_activity';
+  | 'npc_activity'
+  | 'job_shifts';
 
 export interface RealtimeEventContract {
   type: string;
@@ -75,6 +76,33 @@ export interface OpportunityDefinition {
   repeatability?: unknown;
 }
 
+export interface AdminOpportunityInput {
+  title: string;
+  description?: string | null;
+  kind: 'GIG' | 'JOB' | 'QUEST';
+  type: string;
+  difficulty?: number;
+  durationMinutes?: number;
+  requirements?: unknown[];
+  rewards?: unknown[];
+  risks?: unknown[];
+  repeatability?: unknown;
+}
+
+export interface JobEmployment {
+  id: string;
+  characterId: string;
+  opportunityId: string;
+  hiredAt: string;
+  lastShiftAt: string;
+  strikes: number;
+  status: 'ACTIVE' | 'FIRED' | 'QUIT';
+  cadenceHours: number;
+  totalShiftsCompleted: number;
+  totalCreditsEarned: number;
+  opportunity: OpportunityDefinition;
+}
+
 export interface OpportunityInstance {
   id: string;
   definitionId: string;
@@ -93,6 +121,156 @@ export interface ActivityLog {
   message: string;
   createdAt: string;
   relatedEntities?: unknown;
+}
+
+export interface StockQuote {
+  corporationId: string;
+  name: string;
+  industry: string;
+  status: string;
+  stockTicker: string | null;
+  stockPrice: number | null;
+  stockVolatility: number | null;
+  riskOfBankruptcy: number;
+  previousPrice?: number | null;
+  delta?: number | null;
+  percentChange?: number | null;
+  sparkline?: number[];
+}
+
+export interface StockHistory {
+  corporationId: string;
+  corporationName: string;
+  stockTicker: string | null;
+  points: Array<{ price: number; recordedAt: string }>;
+}
+
+export interface StockHolding {
+  id: string;
+  corporationId: string;
+  corporationName: string;
+  stockTicker: string | null;
+  shares: number;
+  averagePrice: number;
+  currentPrice: number;
+  marketValue: number;
+  unrealizedPL: number;
+}
+
+export interface ShopItem {
+  id: string;
+  itemDefinitionId: string;
+  name: string;
+  description?: string | null;
+  category: string;
+  rarity: string;
+  condition: number;
+  weight: number;
+  contraband: boolean;
+  priceCredits: number;
+  effects?: unknown;
+  weaponData?: unknown;
+  clothingData?: unknown;
+  toolData?: unknown;
+}
+
+export interface ShopListing {
+  building: {
+    id: string;
+    name: string;
+    description?: string | null;
+    functionality: string[];
+    ownerType: string;
+    ownerId: string | null;
+  };
+  stock: ShopItem[];
+}
+
+export interface InventoryItem {
+  id: string;
+  itemDefinitionId: string;
+  ownerType: string;
+  ownerId: string;
+  condition: number;
+  customName?: string | null;
+  modifiers?: unknown;
+  itemDefinition: {
+    id: string;
+    name: string;
+    description?: string | null;
+    category: string;
+    rarity: string;
+    baseValue: number;
+    weight: number;
+    effects?: unknown;
+  };
+}
+
+export type StatKey =
+  | 'strength'
+  | 'agility'
+  | 'intelligence'
+  | 'charisma'
+  | 'hacking'
+  | 'combat'
+  | 'stealth'
+  | 'engineering';
+
+export interface BackstoryOption {
+  id: string;
+  label: string;
+  blurb: string;
+  bonuses: Partial<Record<StatKey, number>>;
+  startingCredits: number;
+}
+
+export interface CharacterOptions {
+  backstories: BackstoryOption[];
+  statAllocation: {
+    budget: number;
+    baseValue: number;
+    maxPerKey: number;
+  };
+}
+
+export interface RegisterInput {
+  username: string;
+  email: string;
+  password: string;
+  characterName: string;
+  backstory?: string;
+  motivation?: string;
+  statAllocation?: Partial<Record<StatKey, number>>;
+}
+
+export interface AuthResponse {
+  accessToken: string;
+  player: {
+    id: string;
+    username: string;
+    email?: string | null;
+    character?: {
+      id: string;
+      name: string;
+      [key: string]: unknown;
+    } | null;
+  };
+}
+
+export interface TravelQuote {
+  travelCost: number;
+  travelRiskScore: number;
+  travelEnergyDelta: number;
+  wantedDelta: number;
+  affordable: boolean;
+  currentCredits: number;
+  destination: {
+    planetId: string;
+    planetName: string;
+    districtId: string;
+    districtName: string;
+    buildingId: string | null;
+  };
 }
 
 export interface PlanetWorldEntry {
@@ -244,19 +422,30 @@ export const REALTIME_EVENT_CONTRACTS: RealtimeEventContract[] = [
   },
 ];
 
+export interface ApiClientConfig {
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  getToken?: () => string | null | undefined;
+}
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
-  config: { baseUrl?: string; fetchImpl?: typeof fetch } = {},
+  config: ApiClientConfig = {},
 ): Promise<T> {
   const fetchImpl = config.fetchImpl ?? fetch;
   const baseUrl = config.baseUrl ?? DEFAULT_API_URL;
+  const token = config.getToken?.() ?? null;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((options?.headers as Record<string, string>) ?? {}),
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   const response = await fetchImpl(`${baseUrl}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
     cache: 'no-store',
   });
 
@@ -268,17 +457,93 @@ export async function apiFetch<T>(
   return response.json() as Promise<T>;
 }
 
-export function createApiClient(config?: { baseUrl?: string; fetchImpl?: typeof fetch }) {
+export function createApiClient(config?: ApiClientConfig) {
   const request = <T>(path: string, options?: RequestInit) => apiFetch<T>(path, options, config);
+  const post = <T>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method: 'POST',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
 
   return {
     request,
+    post,
+    // public
     getWorldState: () => request<WorldState>('/simulation/world-state'),
     getSimulationHistory: (limit = 10) =>
       request<SimulationTickSummary[]>(`/simulation/history?limit=${limit}`),
     getRealtimeContracts: () => request<RealtimeEventContract[]>('/simulation/realtime-contracts'),
     getActiveWorldEvents: () => request<WorldEvent[]>('/world-events/active'),
     getOpportunities: () => request<OpportunityDefinition[]>('/opportunities'),
-    runSimulationTick: () => request<SimulationTickSummary>('/simulation/tick', { method: 'POST' }),
+    getOpportunityById: (id: string) => request<OpportunityDefinition>(`/opportunities/${id}`),
+    createOpportunity: (input: AdminOpportunityInput) =>
+      post<OpportunityDefinition>('/opportunities', input),
+    updateOpportunity: (id: string, input: Partial<AdminOpportunityInput>) =>
+      request<OpportunityDefinition>(`/opportunities/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    deleteOpportunity: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/opportunities/${id}`, { method: 'DELETE' }),
+    runSimulationTick: () => post<SimulationTickSummary>('/simulation/tick'),
+    getPlanets: () => request<unknown[]>('/locations/planets'),
+    getPlanet: (id: string) => request<unknown>(`/locations/planets/${id}`),
+    getDistrict: (id: string) => request<unknown>(`/locations/districts/${id}`),
+    getBuilding: (id: string) => request<unknown>(`/locations/buildings/${id}`),
+    getStockMarket: () => request<StockQuote[]>('/stocks/market'),
+    getStockHistory: (corporationId: string, limit = 30) =>
+      request<StockHistory>(`/stocks/history/${corporationId}?limit=${limit}`),
+    getShop: (buildingId: string) => request<ShopListing>(`/shops/${buildingId}`),
+    // auth
+    login: (identifier: string, password: string) =>
+      post<AuthResponse>('/auth/login', { identifier, password }),
+    register: (input: RegisterInput) => post<AuthResponse>('/auth/register', input),
+    getCharacterOptions: () => request<CharacterOptions>('/auth/character-options'),
+    me: () => request<AuthResponse['player']>('/auth/me'),
+    // authenticated
+    getCharacter: (id: string) => request<unknown>(`/characters/${id}`),
+    getCharacterSummary: (id: string) => request<unknown>(`/characters/${id}/summary`),
+    getCharacterInventory: (id: string) => request<InventoryItem[]>(`/characters/${id}/inventory`),
+    getCharacterRelationships: (id: string) => request<unknown[]>(`/characters/${id}/relationships`),
+    travel: (id: string, body: { planetId?: string; districtId?: string; buildingId?: string }) =>
+      post<unknown>(`/characters/${id}/travel`, body),
+    travelQuote: (
+      id: string,
+      body: { planetId?: string; districtId?: string; buildingId?: string },
+    ) => post<TravelQuote>(`/characters/${id}/travel/quote`, body),
+    rest: (id: string) => post<unknown>(`/characters/${id}/rest`),
+    useItem: (id: string, itemInstanceId: string) =>
+      post<unknown>(`/characters/${id}/items/${itemInstanceId}/use`),
+    getActivity: (playerId: string, page = 1, limit = 30) =>
+      request<{ logs: ActivityLog[]; total: number; page: number; limit: number }>(
+        `/players/${playerId}/activity?page=${page}&limit=${limit}`,
+      ),
+    getAvailableOpportunities: (characterId: string) =>
+      request<OpportunityDefinition[]>(`/opportunities/available/${characterId}`),
+    getOpportunityInstances: (characterId: string) =>
+      request<OpportunityInstance[]>(`/opportunities/instances/${characterId}`),
+    acceptOpportunity: (opportunityId: string, characterId: string) =>
+      post<OpportunityInstance>(`/opportunities/${opportunityId}/accept`, { characterId }),
+    resolveOpportunity: (instanceId: string) =>
+      post<OpportunityInstance>(`/opportunities/instances/${instanceId}/resolve`),
+    getStockHoldings: (characterId: string) =>
+      request<StockHolding[]>(`/stocks/holdings/${characterId}`),
+    buyStock: (characterId: string, corporationId: string, shares: number) =>
+      post<unknown>('/stocks/buy', { characterId, corporationId, shares }),
+    sellStock: (characterId: string, corporationId: string, shares: number) =>
+      post<unknown>('/stocks/sell', { characterId, corporationId, shares }),
+    shopBuy: (buildingId: string, itemInstanceId: string, characterId: string) =>
+      post<unknown>(`/shops/${buildingId}/buy`, { itemInstanceId, characterId }),
+    shopSell: (buildingId: string, itemInstanceId: string, characterId: string) =>
+      post<unknown>(`/shops/${buildingId}/sell`, { itemInstanceId, characterId }),
+    // jobs
+    listJobs: (characterId: string) =>
+      request<JobEmployment[]>(`/jobs/employments/${characterId}`),
+    hireForJob: (opportunityId: string, characterId: string) =>
+      post<JobEmployment>(`/jobs/${opportunityId}/hire`, { characterId }),
+    quitJob: (employmentId: string) =>
+      post<JobEmployment>(`/jobs/employments/${employmentId}/quit`),
   };
 }
+
+export type ApiClient = ReturnType<typeof createApiClient>;
