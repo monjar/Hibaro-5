@@ -1,11 +1,14 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { IsString, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthenticatedPlayer } from '../auth/auth.service';
 import { CurrentPlayer } from '../auth/current-player.decorator';
 import { JobsService } from './jobs.service';
 
 class HireDto {
+  @IsString()
+  @IsUUID()
   characterId!: string;
 }
 

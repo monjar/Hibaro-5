@@ -67,6 +67,40 @@ hibaro-5/
 - Docker + Docker Compose
 - npm 9+
 
+### One-command Setup + Run
+
+```bash
+npm run setup:run
+npm run setup:stop
+```
+
+That script will:
+- install dependencies when needed
+- create `.env` from `.env.example` if missing
+- start Postgres and Redis with Docker Compose
+- wait for both services to accept connections
+- run Prisma migrations and seed data
+- launch the API, player web app, admin app, and worker together
+
+Optional flags:
+
+```bash
+./scripts/setup-and-run.sh --help
+./scripts/setup-and-run.sh --no-worker
+./scripts/setup-and-run.sh --force-install
+./scripts/setup-and-run.sh --sudo-docker
+./scripts/stop-and-clean.sh --help
+./scripts/stop-and-clean.sh --docker
+./scripts/stop-and-clean.sh --sudo-docker
+```
+
+If a previous run left ports `3000`, `3001`, or `3002` occupied, stop the stale processes first:
+
+```bash
+npm run setup:stop
+npm run setup:stop -- --docker --sudo-docker
+```
+
 ### Step-by-step Setup
 
 ```bash

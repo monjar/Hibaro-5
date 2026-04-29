@@ -22,6 +22,17 @@ const VALID_BACKSTORIES = [
   'DRIFTER',
 ];
 
+export class StatAllocationDto {
+  @IsOptional() @IsInt() @Min(0) @Max(8) strength?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) agility?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) intelligence?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) charisma?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) hacking?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) combat?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) stealth?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(8) engineering?: number;
+}
+
 export class RegisterDto {
   @ApiProperty({ example: 'test_player' })
   @IsString()
@@ -80,15 +91,4 @@ export class RegisterDto {
   @IsOptional()
   @IsObject()
   statAllocation?: StatAllocationDto;
-}
-
-export class StatAllocationDto {
-  @IsOptional() @IsInt() @Min(0) @Max(8) strength?: number;
-  @IsOptional() @IsInt() @Min(0) @Max(8) agility?: number;
-  @IsOptional() @IsInt() @Min(0) @Max(8) intelligence?: number;
-  @IsOptional() @IsInt() @Min(0) @Max(8) charisma?: number;
-  @IsOptional() @IsInt() @Min(0) @Max(8) hacking?: number;
-  @IsOptional() @IsInt() @Min(0) @Max(8) combat?: number;
-  @IsOptional() @IsInt() @Min(0) @Max(8) stealth?: number;
-  @IsOptional() @IsInt() @Min(0) @Max(8) engineering?: number;
 }

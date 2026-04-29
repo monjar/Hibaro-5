@@ -251,7 +251,6 @@ model Character {
 
   factionMemberships     FactionMembership[]
   corporationEmployments CorporationEmployment[]
-  itemInstances          ItemInstance[]
   opportunityInstances   OpportunityInstance[]
   activityLogs           ActivityLog[]
   stockHoldings          StockHolding[]
@@ -421,8 +420,6 @@ model ItemInstance {
   customName       String?
   modifiers        Json?
   createdAt        DateTime       @default(now())
-
-  character Character? @relation(fields: [ownerId], references: [id], map: "item_instance_character_fk")
 }
 
 model OpportunityDefinition {

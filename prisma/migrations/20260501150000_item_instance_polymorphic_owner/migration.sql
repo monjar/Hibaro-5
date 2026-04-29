@@ -1,0 +1,1 @@
+ALTER TABLE "ItemInstance" DROP CONSTRAINT IF EXISTS "item_instance_character_fk";
