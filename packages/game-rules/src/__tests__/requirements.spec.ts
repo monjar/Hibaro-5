@@ -67,12 +67,20 @@ describe('checkRequirement', () => {
     };
 
     it('passes when faction reputation meets minimum', () => {
-      const req: Requirement = { type: 'FACTION_REPUTATION_MIN', id: 'faction-red-market', value: 10 };
+      const req: Requirement = {
+        type: 'FACTION_REPUTATION_MIN',
+        id: 'faction-red-market',
+        value: 10,
+      };
       expect(checkRequirement(baseCharacter, req, context)).toBe(true);
     });
 
     it('fails when faction reputation is below minimum', () => {
-      const req: Requirement = { type: 'FACTION_REPUTATION_MIN', id: 'faction-red-market', value: 50 };
+      const req: Requirement = {
+        type: 'FACTION_REPUTATION_MIN',
+        id: 'faction-red-market',
+        value: 50,
+      };
       expect(checkRequirement(baseCharacter, req, context)).toBe(false);
     });
 

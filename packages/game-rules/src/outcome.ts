@@ -1,4 +1,11 @@
-import { CharacterStats, OpportunityDefinition, OpportunityOutcome, Risk, RiskConsequence, Reward } from './types';
+import {
+  CharacterStats,
+  OpportunityDefinition,
+  OpportunityOutcome,
+  Risk,
+  RiskConsequence,
+  Reward,
+} from './types';
 import { calculateOpportunitySuccessChance } from './success-chance';
 
 export function rollOpportunityOutcome(
