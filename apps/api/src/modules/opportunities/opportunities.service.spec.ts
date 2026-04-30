@@ -25,6 +25,12 @@ function makePrismaMock() {
     jobEmployment: {
       deleteMany: jest.fn(),
     },
+    relationship: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
+    },
     activityLog: {
       create: jest.fn(),
     },
@@ -38,6 +44,18 @@ const baseCharacter = {
   credits: 1000,
   hacking: 5,
   intelligence: 5,
+  health: 100,
+  maxHealth: 100,
+  energy: 100,
+  maxEnergy: 100,
+  wantedLevel: 0,
+  strength: 5,
+  agility: 5,
+  charisma: 5,
+  combat: 5,
+  stealth: 5,
+  engineering: 5,
+  reputation: 0,
 };
 
 const baseDefinition = {
@@ -68,6 +86,8 @@ describe('OpportunitiesService.acceptOpportunity', () => {
     prisma.opportunityDefinition.findUnique.mockResolvedValue(baseDefinition);
     prisma.character.findUnique.mockResolvedValue(baseCharacter);
     prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    prisma.relationship.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.findMany.mockResolvedValue([]);
     prisma.opportunityInstance.create.mockResolvedValue({
       id: 'inst-1',
       definitionId: baseDefinition.id,
@@ -142,6 +162,8 @@ describe('OpportunitiesService.acceptOpportunity', () => {
     });
     prisma.character.findUnique.mockResolvedValue(baseCharacter);
     prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    prisma.relationship.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.findMany.mockResolvedValue([]);
     jobs.findActiveEmployment.mockResolvedValue(null);
 
     await expect(
@@ -158,6 +180,8 @@ describe('OpportunitiesService.acceptOpportunity', () => {
     });
     prisma.character.findUnique.mockResolvedValue(baseCharacter);
     prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    prisma.relationship.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.findMany.mockResolvedValue([]);
     jobs.findActiveEmployment.mockResolvedValue({ id: 'emp-1', status: 'ACTIVE' });
     prisma.opportunityInstance.create.mockResolvedValue({
       id: 'inst-shift',
@@ -178,6 +202,8 @@ describe('OpportunitiesService.acceptOpportunity', () => {
     });
     prisma.character.findUnique.mockResolvedValue(baseCharacter);
     prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    prisma.relationship.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.findMany.mockResolvedValue([]);
     jobs.findActiveEmployment.mockResolvedValue({ id: 'emp-1', status: 'FIRED' });
 
     await expect(
@@ -192,10 +218,41 @@ describe('OpportunitiesService.acceptOpportunity', () => {
     });
     prisma.character.findUnique.mockResolvedValue({ ...baseCharacter, hacking: 4 });
     prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    prisma.relationship.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.findMany.mockResolvedValue([]);
 
     await expect(
       service.acceptOpportunity('opp-1', 'char-1', 'player-1'),
     ).rejects.toThrow(/hacking must be >= 8/);
+  });
+
+  it('rejects locked follow-up quests until the prerequisite is completed', async () => {
+    prisma.opportunityDefinition.findUnique.mockResolvedValue({
+      ...baseDefinition,
+      kind: 'QUEST',
+      id: 'quest-2',
+    });
+    prisma.opportunityDefinition.findMany.mockResolvedValue([
+      {
+        ...baseDefinition,
+        kind: 'QUEST',
+        id: 'quest-1',
+        rewards: [{ type: 'UNLOCK_QUEST', questId: 'quest-2' }],
+      },
+      {
+        ...baseDefinition,
+        kind: 'QUEST',
+        id: 'quest-2',
+      },
+    ]);
+    prisma.character.findUnique.mockResolvedValue(baseCharacter);
+    prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    prisma.relationship.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.findMany.mockResolvedValue([]);
+
+    await expect(service.acceptOpportunity('quest-2', 'char-1', 'player-1')).rejects.toThrow(
+      /Quest is locked/,
+    );
   });
 });
 

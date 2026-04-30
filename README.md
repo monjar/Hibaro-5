@@ -6,15 +6,15 @@
 
 Heliora is a fully playable sci-fi idle RPG where you control a character navigating the dark, corporate-controlled solar system of Hibaro-5. Take gigs, jobs, and quests; travel between planets; rest in safehouses; trade gear at shops and contraband on the black market; speculate on corporate stock; and watch the world tick around you while factions, corporations, and rival operators reshape the economy.
 
-The game runs as a **browser game** at http://localhost:3001 once the API and web app are up. The world advances on a server-side auto-tick every 30 seconds, so opportunities you accept resolve themselves while you're away — true idle progression.
+The game runs as a **browser game** at http://localhost:3001 once the API and web app are up. The world advances on a server-side auto-tick every 30 seconds, so opportunities you accept resolve themselves while you're away — true idle progression. The dashboard and opportunity board now subscribe to a live SSE stream, so tick completions and NPC-world changes show up without waiting for browser polling.
 
 ## How to Play
 
 1. Start everything (see Local Setup below) and open http://localhost:3001.
 2. Log in as `test_player` / `Heliora123`, or register a new operator.
 3. The dashboard shows your character — credits, health, energy, wanted level, location, and any opportunities currently in progress.
-4. Click **OPPORTUNITIES** in the nav to accept gigs, jobs, and quests. They run on a real timer; the world auto-ticks every 30s and resolves anything that's due. You can also resolve them manually the moment they're ready.
-5. **TRAVEL** lets you move between planets, districts, and buildings. Higher danger / lower law = higher cost, more wanted-level risk, and a bigger energy hit.
+4. Click **OPPORTUNITIES** in the nav to accept gigs, jobs, and quest-chain steps. Story quests can unlock follow-up quests, and one-off quest steps disappear once completed.
+5. **TRAVEL** lets you move between planets, districts, and buildings. Higher danger / lower law = higher cost, more wanted-level risk, and a bigger energy hit. District-controlling factions now also apply reputation-based warnings, hostile surcharges, or hard lockouts.
 6. **SHOP** trades gear with whichever building you're currently inside. Black markets pay a contraband bonus on sales but bringing contraband into a high-law district may raise your wanted level.
 7. **MARKET** is the corporate stock exchange — buy and sell shares; prices swing every world tick based on revenue, debt, world events, and bankruptcy risk.
 8. **INVENTORY** shows what you're carrying and lets you use consumables (e.g. medical patches restore health).
@@ -203,6 +203,11 @@ Running `npm run db:seed` creates:
 - Starting location: Antrolus / Arrival Yard / Arrival Processing Hub
 - Starting credits: 250
 
+### Story Quest Chain
+- **Welcome to Antrolus** — onboarding quest that unlocks the next investigation step
+- **Something in the Cargo** — Coil Union follow-up that opens the Pigeon95 trail
+- **Pigeon95 Secret** — final investigation step, with corporation-standing lockout support
+
 ## API Routes
 
 ### Health
@@ -232,9 +237,18 @@ GET  /characters/:id/inventory               # All items owned by your character
 GET  /characters/:id/relationships           # Your faction/corp reputation etc. (JWT required)
 POST /characters/:id/travel                  # Move your character to a new location (JWT required)
   Body: { "planetId": "...", "districtId": "...", "buildingId": "..." }
-POST /characters/:id/travel/quote            # Preview travel cost / risk (JWT required)
+POST /characters/:id/travel/quote            # Preview travel cost / risk + faction-standing penalties (JWT required)
 POST /characters/:id/rest                    # Recover at a safehouse / clinic / hub (JWT required)
 POST /characters/:id/items/:itemId/use       # Consume a consumable item (JWT required)
+```
+
+### Simulation / Realtime
+```
+POST /simulation/tick                        # Run one simulation tick manually
+GET  /simulation/world-state                # Snapshot of planets, districts, corps, events, etc.
+GET  /simulation/history?limit=10           # Recent tick history
+GET  /simulation/realtime-contracts         # Shared realtime event contract metadata
+GET  /simulation/stream                     # Server-sent event stream for tick + NPC updates
 ```
 
 ### Shops

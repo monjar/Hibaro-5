@@ -1198,10 +1198,14 @@ async function main() {
       rewards: [
         { type: 'CREDITS', value: 100 },
         { type: 'UNLOCK_BUILDING', buildingId: 'bldg-antrolus-black-market' },
+        { type: 'UNLOCK_QUEST', questId: 'opp-quest-something-in-cargo' },
       ],
       risks: [],
       possibleEventIds: [],
       questData: {
+        chainId: 'chain-antrolus-onboarding',
+        stepNumber: 1,
+        totalSteps: 3,
         objectives: [{ type: 'COMPLETE_GIG_ON_PLANET', planetId: antrolus.id, count: 1 }],
         isOneOff: true,
       },
@@ -1231,6 +1235,9 @@ async function main() {
       risks: [],
       possibleEventIds: [],
       questData: {
+        chainId: 'chain-antrolus-onboarding',
+        stepNumber: 2,
+        totalSteps: 3,
         objectives: [{ type: 'COMPLETE_JOB', jobId: 'opp-courier-loop', count: 1 }],
         isOneOff: true,
         hint: 'Start by taking on courier work for Pigeon Corporation.',
@@ -1238,7 +1245,42 @@ async function main() {
     },
   });
 
-  console.log('✅ Opportunity definitions: 2 gigs, 2 jobs, 2 quests');
+  // QUEST 3: Pigeon95 Secret
+  await prisma.opportunityDefinition.upsert({
+    where: { id: 'opp-quest-pigeon95-secret' },
+    update: {},
+    create: {
+      id: 'opp-quest-pigeon95-secret',
+      title: 'Pigeon95 Secret',
+      description:
+        'The shipment trail leads to Fulfilment Core. Trace the tampered manifests before they disappear.',
+      kind: 'QUEST',
+      postedByType: 'FACTION',
+      postedById: coilUnion.id,
+      type: 'INVESTIGATION',
+      requirements: [
+        { type: 'CORPORATION_REPUTATION_MAX', id: pigeonCorp.id, value: 15 },
+      ],
+      durationMinutes: 90,
+      difficulty: 3,
+      rewards: [
+        { type: 'CREDITS', value: 180 },
+        { type: 'FACTION_REPUTATION', factionId: coilUnion.id, value: 8 },
+      ],
+      risks: [],
+      possibleEventIds: [],
+      questData: {
+        chainId: 'chain-antrolus-onboarding',
+        stepNumber: 3,
+        totalSteps: 3,
+        objectives: [{ type: 'VISIT_DISTRICT', districtId: fulfilmentCore.id, count: 1 }],
+        isOneOff: true,
+        hint: 'Hostile standing with Pigeon Corporation will lock this step entirely.',
+      },
+    },
+  });
+
+  console.log('✅ Opportunity definitions: 2 gigs, 2 jobs, 3 quests');
 
   // ==================== WORLD EVENTS ====================
   const now = new Date();

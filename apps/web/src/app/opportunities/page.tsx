@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuthGuard } from '@/lib/session-context';
-import { useAutoRefresh, useCharacter } from '@/lib/use-character';
+import { useCharacter } from '@/lib/use-character';
+import { useEventStream } from '@/lib/use-event-stream';
 import { Panel } from '@/components/Panel';
 import { KindBadge, StatusBadge } from '@/components/KindBadge';
 import type {
@@ -26,7 +27,7 @@ export default function OpportunitiesPage() {
   const [hiringFor, setHiringFor] = useState<string | null>(null);
   const [message, setMessage] = useState('');
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     if (!session.characterId) return;
     try {
       const [a, i, j] = await Promise.all([
@@ -40,13 +41,16 @@ export default function OpportunitiesPage() {
     } catch {
       // ignore
     }
-  }
+  }, [session.characterId]);
 
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.characterId]);
-  useAutoRefresh(refresh, 12_000);
+  }, [refresh]);
+  useEventStream(
+    ['simulation.tick.completed'],
+    () => void refresh(),
+    Boolean(session.characterId),
+  );
 
   async function accept(opp: OpportunityDefinition) {
     if (!session.characterId) return;
@@ -120,12 +124,8 @@ export default function OpportunitiesPage() {
 
   if (!session.ready || !session.token) return null;
 
-  const inProgress = instances.filter(
-    (i) => i.status === 'IN_PROGRESS' || i.status === 'ACCEPTED',
-  );
-  const completed = instances.filter(
-    (i) => i.status === 'COMPLETED' || i.status === 'FAILED',
-  );
+  const inProgress = instances.filter((i) => i.status === 'IN_PROGRESS' || i.status === 'ACCEPTED');
+  const completed = instances.filter((i) => i.status === 'COMPLETED' || i.status === 'FAILED');
   const hasActiveActivity = inProgress.length > 0;
   const activeJobs = employments.filter((e) => e.status === 'ACTIVE');
   const employedOpportunityIds = new Set(activeJobs.map((j) => j.opportunityId));
@@ -241,7 +241,9 @@ export default function OpportunitiesPage() {
                         {emp.opportunity.title}
                       </span>
                     </div>
-                    <span className={`text-[10px] font-mono px-2 py-0.5 border rounded ${toneClass}`}>
+                    <span
+                      className={`text-[10px] font-mono px-2 py-0.5 border rounded ${toneClass}`}
+                    >
                       {status.label}
                     </span>
                   </div>
@@ -274,6 +276,7 @@ export default function OpportunitiesPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {available.map((opp) => {
               const requirements = (opp.requirements as RequirementEntry[]) ?? [];
+              const questData = opp.questData;
               const requirementsMet = character
                 ? requirements.every((r) => {
                     if (r.type === 'CREDITS_MIN') return character.credits >= r.value;
@@ -305,6 +308,16 @@ export default function OpportunitiesPage() {
                   <p className="text-heliora-text-dim text-xs mb-2 line-clamp-3">
                     {opp.description}
                   </p>
+                  {opp.kind === 'QUEST' && questData?.stepNumber && questData?.totalSteps && (
+                    <div className="mb-2 text-[11px] text-heliora-cyan font-mono">
+                      Chain progress {questData.stepNumber}/{questData.totalSteps}
+                    </div>
+                  )}
+                  {opp.kind === 'QUEST' && questData?.hint && (
+                    <div className="mb-2 text-[11px] text-heliora-text-dim">
+                      Hint: {questData.hint}
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs mb-2">
                     <span className="text-heliora-text-dim">⏱ {opp.durationMinutes ?? '?'}m</span>
                     {(opp.rewards as RewardEntry[]).map((r, i) => {
@@ -352,11 +365,7 @@ export default function OpportunitiesPage() {
                       disabled={hiringFor === opp.id || !requirementsMet}
                       className="w-full px-3 py-1.5 bg-heliora-yellow/20 border border-heliora-yellow/50 rounded text-heliora-yellow text-xs font-mono font-bold hover:bg-heliora-yellow/30 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     >
-                      {hiringFor === opp.id
-                        ? 'HIRING…'
-                        : !requirementsMet
-                          ? 'LOCKED'
-                          : 'GET HIRED'}
+                      {hiringFor === opp.id ? 'HIRING…' : !requirementsMet ? 'LOCKED' : 'GET HIRED'}
                     </button>
                   ) : (
                     <button

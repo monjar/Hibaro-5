@@ -16,6 +16,12 @@ export interface RealtimeEventContract {
   payloadKeys: string[];
 }
 
+export interface RealtimeStreamEvent<TPayload = unknown> {
+  type: string;
+  sentAt: string;
+  payload: TPayload;
+}
+
 export interface WorldEvent {
   id: string;
   title: string;
@@ -74,6 +80,14 @@ export interface OpportunityDefinition {
   rewards: Record<string, unknown>[];
   risks: Record<string, unknown>[];
   repeatability?: unknown;
+  questData?: {
+    chainId?: string;
+    stepNumber?: number;
+    totalSteps?: number;
+    isOneOff?: boolean;
+    hint?: string;
+    objectives?: Array<Record<string, unknown>>;
+  } | null;
 }
 
 export interface AdminOpportunityInput {
@@ -370,6 +384,18 @@ export interface ActivityLog {
   relatedEntities?: unknown;
 }
 
+export interface RelationshipEntry {
+  id: string;
+  sourceType: string;
+  sourceId: string;
+  targetType: string;
+  targetId: string;
+  relationshipType: string;
+  value: number;
+  metadata?: unknown;
+  updatedAt: string;
+}
+
 export interface StockQuote {
   corporationId: string;
   name: string;
@@ -506,11 +532,17 @@ export interface AuthResponse {
 
 export interface TravelQuote {
   travelCost: number;
+  travelSurcharge: number;
   travelRiskScore: number;
   travelEnergyDelta: number;
   wantedDelta: number;
+  blocked: boolean;
   affordable: boolean;
   currentCredits: number;
+  controllingFactionName?: string | null;
+  reputationScore: number;
+  reputationModifier: 'NEUTRAL' | 'SURCHARGE' | 'LOCKED' | 'PRIVILEGED';
+  warnings: string[];
   destination: {
     planetId: string;
     planetName: string;
@@ -836,7 +868,8 @@ export function createApiClient(config?: ApiClientConfig) {
     getCharacter: (id: string) => request<unknown>(`/characters/${id}`),
     getCharacterSummary: (id: string) => request<unknown>(`/characters/${id}/summary`),
     getCharacterInventory: (id: string) => request<InventoryItem[]>(`/characters/${id}/inventory`),
-    getCharacterRelationships: (id: string) => request<unknown[]>(`/characters/${id}/relationships`),
+    getCharacterRelationships: (id: string) =>
+      request<RelationshipEntry[]>(`/characters/${id}/relationships`),
     travel: (id: string, body: { planetId?: string; districtId?: string; buildingId?: string }) =>
       post<unknown>(`/characters/${id}/travel`, body),
     travelQuote: (

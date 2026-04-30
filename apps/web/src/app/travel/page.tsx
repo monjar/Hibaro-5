@@ -228,9 +228,7 @@ export default function TravelPage() {
                 return (
                   <button
                     key={b.id}
-                    onClick={() =>
-                      void fetchQuote(selectedPlanet!.id, districtDetail.id, b.id)
-                    }
+                    onClick={() => void fetchQuote(selectedPlanet!.id, districtDetail.id, b.id)}
                     disabled={closed}
                     className="w-full text-left border border-heliora-border rounded p-2 hover:border-heliora-cyan/30 disabled:opacity-50"
                   >
@@ -243,11 +241,7 @@ export default function TravelPage() {
                       </span>
                       <span className="text-heliora-text-dim text-xs">{b.status}</span>
                     </div>
-                    {fn.length > 0 && (
-                      <div className="text-[11px] text-heliora-text-dim mt-1">
-                        {fn.join(' · ')}
-                      </div>
-                    )}
+                    {fn.length > 0 && <div className="text-[11px] text-heliora-text-dim mt-1">{fn.join(' · ')}</div>}
                   </button>
                 );
               })}
@@ -259,28 +253,58 @@ export default function TravelPage() {
       {quote && (
         <Panel title="Travel Quote" accent="orange" glow>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-            <Stat label="Destination" value={`${quote.destination.districtName}, ${quote.destination.planetName}`} />
+            <Stat
+              label="Destination"
+              value={`${quote.destination.districtName}, ${quote.destination.planetName}`}
+            />
             <Stat label="Cost" value={`$${quote.travelCost}`} good={quote.affordable} />
             <Stat label="Risk" value={`${quote.travelRiskScore}/20`} />
             <Stat label="Energy" value={`${quote.travelEnergyDelta}`} />
-            <Stat
-              label="Wanted"
-              value={quote.wantedDelta > 0 ? `+${quote.wantedDelta}` : '0'}
-            />
+            <Stat label="Wanted" value={quote.wantedDelta > 0 ? `+${quote.wantedDelta}` : '0'} />
           </div>
+          {(
+            quote.controllingFactionName ||
+            quote.travelSurcharge > 0 ||
+            quote.warnings.length > 0
+          ) && (
+            <div className="mt-4 rounded border border-heliora-border bg-heliora-dark p-3 text-xs text-heliora-text-dim space-y-1">
+              {quote.controllingFactionName && (
+                <div>
+                  Controller:{' '}
+                  <span className="text-heliora-text">{quote.controllingFactionName}</span>
+                  <span className="ml-2">
+                    Rep{' '}
+                    {quote.reputationScore >= 0
+                      ? `+${quote.reputationScore}`
+                      : quote.reputationScore}
+                  </span>
+                </div>
+              )}
+              {quote.travelSurcharge > 0 && (
+                <div className="text-heliora-orange">
+                  Hostile-standing surcharge: +${quote.travelSurcharge}
+                </div>
+              )}
+              {quote.warnings.map((warning) => (
+                <div key={warning}>{warning}</div>
+              ))}
+            </div>
+          )}
           <div className="mt-4 flex items-center justify-between">
             <p className="text-xs text-heliora-text-dim">
               You have ${quote.currentCredits.toFixed(0)} credits.
               {!quote.affordable && (
-                <span className="ml-2 text-heliora-red">Insufficient credits.</span>
+                <span className="ml-2 text-heliora-red">
+                  {quote.blocked ? 'Access denied.' : 'Insufficient credits.'}
+                </span>
               )}
             </p>
             <button
               onClick={() => void commitTravel()}
-              disabled={busy || !quote.affordable}
+              disabled={busy || !quote.affordable || quote.blocked}
               className="px-4 py-2 bg-heliora-orange/20 border border-heliora-orange/50 rounded text-heliora-orange text-sm font-mono font-bold hover:bg-heliora-orange/30 disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              {busy ? 'TRAVELING…' : 'CONFIRM TRAVEL'}
+              {busy ? 'TRAVELING…' : quote.blocked ? 'ACCESS LOCKED' : 'CONFIRM TRAVEL'}
             </button>
           </div>
         </Panel>

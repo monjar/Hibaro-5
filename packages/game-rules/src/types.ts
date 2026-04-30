@@ -21,8 +21,13 @@ export interface CharacterStats {
 export interface Requirement {
   type:
     | 'STAT_MIN'
+    | 'STAT_MAX'
+    | 'RELATIONSHIP_MIN'
+    | 'RELATIONSHIP_MAX'
     | 'FACTION_REPUTATION_MIN'
+    | 'FACTION_REPUTATION_MAX'
     | 'CORPORATION_REPUTATION_MIN'
+    | 'CORPORATION_REPUTATION_MAX'
     | 'ITEM_REQUIRED'
     | 'RANK_REQUIRED'
     | 'QUEST_COMPLETED'
@@ -33,6 +38,7 @@ export interface Requirement {
   value?: number;
   id?: string;
   name?: string;
+  scope?: 'FACTION' | 'CORPORATION';
 }
 
 export interface Reward {

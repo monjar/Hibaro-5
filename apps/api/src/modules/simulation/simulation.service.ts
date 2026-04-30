@@ -5,6 +5,7 @@ import { computeNextStockPrice } from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { JobsService } from '../jobs/jobs.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { clampWorldMetric, deriveCorporationStatus } from './simulation.utils';
 
 @Injectable()
@@ -13,6 +14,7 @@ export class SimulationService {
     private prisma: PrismaService,
     private opportunitiesService: OpportunitiesService,
     private jobsService: JobsService,
+    private realtimeService: RealtimeService,
   ) {}
 
   async tick() {
@@ -109,11 +111,18 @@ export class SimulationService {
       },
     });
 
-    return {
+    const tickSummary = {
       id: storedTick.id,
       ...summary,
       results,
     };
+
+    this.realtimeService.publish('simulation.tick.completed', tickSummary);
+    for (const action of npcActivity.actions) {
+      this.realtimeService.publish('npc.activity.recorded', action);
+    }
+
+    return tickSummary;
   }
 
   async getHistory(limit = 10) {

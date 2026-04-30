@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useAuthGuard } from '@/lib/session-context';
-import { useAutoRefresh, useCharacter } from '@/lib/use-character';
+import { useCharacter } from '@/lib/use-character';
+import { useEventStream } from '@/lib/use-event-stream';
 import { Panel } from '@/components/Panel';
 import { StatBar, StatPill } from '@/components/StatBar';
 import { KindBadge, StatusBadge } from '@/components/KindBadge';
@@ -57,13 +58,7 @@ export default function HomePage() {
   const [resolving, setResolving] = useState<string | null>(null);
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    if (!session.characterId) return;
-    void refreshAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.characterId]);
-
-  async function refreshAll() {
+  const refreshAll = useCallback(async () => {
     if (!session.characterId || !session.player?.id) return;
     try {
       const [inst, act, events] = await Promise.all([
@@ -78,9 +73,18 @@ export default function HomePage() {
     } catch {
       // soft fail
     }
-  }
+  }, [refresh, session.characterId, session.player?.id]);
 
-  useAutoRefresh(refreshAll, 12_000);
+  useEffect(() => {
+    if (!session.characterId) return;
+    void refreshAll();
+  }, [refreshAll, session.characterId]);
+
+  useEventStream(
+    ['simulation.tick.completed'],
+    () => void refreshAll(),
+    Boolean(session.characterId),
+  );
 
   async function resolveInstance(instanceId: string) {
     setResolving(instanceId);
@@ -109,9 +113,7 @@ export default function HomePage() {
   }
 
   if (!session.ready || !session.token) {
-    return (
-      <main className="max-w-7xl mx-auto px-4 py-12 text-heliora-text-dim">Loading…</main>
-    );
+    return <main className="max-w-7xl mx-auto px-4 py-12 text-heliora-text-dim">Loading…</main>;
   }
   if (!character) {
     return (
@@ -121,9 +123,7 @@ export default function HomePage() {
     );
   }
 
-  const inProgress = instances.filter(
-    (i) => i.status === 'IN_PROGRESS' || i.status === 'ACCEPTED',
-  );
+  const inProgress = instances.filter((i) => i.status === 'IN_PROGRESS' || i.status === 'ACCEPTED');
   const recentCompleted = instances
     .filter((i) => i.status === 'COMPLETED' || i.status === 'FAILED')
     .slice(0, 5);

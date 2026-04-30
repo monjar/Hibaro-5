@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { CharacterStats, Requirement, RequirementContext, checkRequirements } from '@heliora/game-rules';
 import { ActivityType, OpportunityType, RelationshipType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { JobsService } from '../jobs/jobs.service';
@@ -23,6 +24,16 @@ export interface AdminOpportunityInput {
   risks?: unknown[];
   repeatability?: unknown;
 }
+
+type RewardEntry = Record<string, unknown>;
+type QuestDataEntry = {
+  chainId?: string;
+  stepNumber?: number;
+  totalSteps?: number;
+  isOneOff?: boolean;
+  hint?: string;
+  objectives?: Array<Record<string, unknown>>;
+};
 
 @Injectable()
 export class OpportunitiesService {
@@ -138,10 +149,20 @@ export class OpportunitiesService {
       select: { definitionId: true },
     });
     const inProgressIds = new Set(inProgress.map((i) => i.definitionId));
+    const requirementContext = await this.buildRequirementContext(characterId);
+    const completedQuestIds = new Set(requirementContext.completedQuestIds ?? []);
+    const unlockSources = this.buildQuestUnlockSources(all);
+    const characterStats = this.toCharacterStats(character);
 
     return all.filter((opp) => {
       if (inProgressIds.has(opp.id)) return false;
-      return true;
+      if (this.isOneOffQuestCompleted(opp, completedQuestIds)) return false;
+      if (!this.isQuestUnlocked(opp, completedQuestIds, unlockSources)) return false;
+      return checkRequirements(
+        characterStats,
+        this.readRequirements(opp.requirements),
+        requirementContext,
+      ).passed;
     });
   }
 
@@ -196,23 +217,35 @@ export class OpportunitiesService {
       }
     }
 
-    const requirements = definition.requirements as any[];
-    for (const req of requirements) {
-      if (req.type === 'STAT_MIN') {
-        const statValue = character[req.key as keyof typeof character] as number;
-        if (statValue < req.value) {
-          throw new BadRequestException(
-            `Requirement not met: ${req.key} must be >= ${req.value} (current: ${statValue})`,
-          );
-        }
-      }
-      if (req.type === 'CREDITS_MIN') {
-        if (character.credits < req.value) {
-          throw new BadRequestException(
-            `Requirement not met: credits must be >= ${req.value} (current: ${character.credits})`,
-          );
-        }
-      }
+    const [requirementContext, allDefinitions] = await Promise.all([
+      this.buildRequirementContext(characterId),
+      definition.kind === 'QUEST'
+        ? this.prisma.opportunityDefinition.findMany()
+        : Promise.resolve([definition]),
+    ]);
+    const completedQuestIds = new Set(requirementContext.completedQuestIds ?? []);
+    if (this.isOneOffQuestCompleted(definition, completedQuestIds)) {
+      throw new BadRequestException('This quest is a one-off and has already been completed');
+    }
+    const unlockSources = this.buildQuestUnlockSources(allDefinitions);
+    if (!this.isQuestUnlocked(definition, completedQuestIds, unlockSources)) {
+      throw new BadRequestException('Quest is locked until you complete its prerequisite chain');
+    }
+
+    const requirements = this.readRequirements(definition.requirements);
+    const requirementResult = checkRequirements(
+      this.toCharacterStats(character),
+      requirements,
+      requirementContext,
+    );
+    if (!requirementResult.passed) {
+      throw new BadRequestException(
+        this.describeFailedRequirement(
+          requirementResult.failedRequirements[0],
+          character,
+          requirementContext,
+        ),
+      );
     }
 
     const now = new Date();
@@ -327,6 +360,8 @@ export class OpportunitiesService {
             delta: reward.value,
           });
           appliedRewards.push(reward);
+        } else if (reward.type === 'UNLOCK_QUEST' || reward.type === 'UNLOCK_BUILDING') {
+          appliedRewards.push(reward);
         }
       }
     } else {
@@ -353,6 +388,19 @@ export class OpportunitiesService {
     if (Object.keys(characterUpdates).length > 0) {
       await this.prisma.character.update({ where: { id: character.id }, data: characterUpdates });
     }
+
+    const questData = this.readQuestData(definition.questData);
+    const unlockedQuestIds = success
+      ? appliedRewards
+          .filter((reward) => reward.type === 'UNLOCK_QUEST' && typeof reward.questId === 'string')
+          .map((reward) => reward.questId as string)
+      : [];
+    const unlockedQuests = unlockedQuestIds.length
+      ? await this.prisma.opportunityDefinition.findMany({
+          where: { id: { in: unlockedQuestIds } },
+          select: { id: true, title: true },
+        })
+      : [];
 
     const outcome = {
       success,
@@ -382,6 +430,16 @@ export class OpportunitiesService {
         },
       },
       relationshipChanges,
+      ...(definition.kind === 'QUEST'
+        ? {
+            questProgress: {
+              chainId: questData?.chainId ?? null,
+              stepNumber: questData?.stepNumber ?? null,
+              totalSteps: questData?.totalSteps ?? null,
+              unlockedQuests,
+            },
+          }
+        : {}),
       resolvedAt: now.toISOString(),
     };
 
@@ -503,6 +561,164 @@ export class OpportunitiesService {
       await this.prisma.relationship.create({
         data: { sourceType, sourceId, targetType, targetId, relationshipType, value: delta },
       });
+    }
+  }
+
+  private async buildRequirementContext(characterId: string): Promise<RequirementContext> {
+    const [relationships, completedQuestInstances] = await Promise.all([
+      this.prisma.relationship.findMany({
+        where: {
+          sourceType: 'CHARACTER',
+          sourceId: characterId,
+          relationshipType: 'REPUTATION',
+        },
+      }),
+      this.prisma.opportunityInstance.findMany({
+        where: {
+          characterId,
+          status: 'COMPLETED',
+          definition: { kind: 'QUEST' },
+        },
+        select: { definitionId: true },
+      }),
+    ]);
+
+    const factionReputations: Record<string, number> = {};
+    const corporationReputations: Record<string, number> = {};
+
+    for (const relationship of relationships) {
+      if (relationship.targetType === 'FACTION') {
+        factionReputations[relationship.targetId] = relationship.value;
+      }
+      if (relationship.targetType === 'CORPORATION') {
+        corporationReputations[relationship.targetId] = relationship.value;
+      }
+    }
+
+    return {
+      factionReputations,
+      corporationReputations,
+      completedQuestIds: completedQuestInstances.map((instance) => instance.definitionId),
+    };
+  }
+
+  private buildQuestUnlockSources(definitions: Array<{ id: string; rewards: unknown }>) {
+    const unlockSources = new Map<string, string[]>();
+
+    for (const definition of definitions) {
+      for (const reward of this.readRewards(definition.rewards)) {
+        if (reward.type !== 'UNLOCK_QUEST' || typeof reward.questId !== 'string') continue;
+        const sourceIds = unlockSources.get(reward.questId as string) ?? [];
+        sourceIds.push(definition.id);
+        unlockSources.set(reward.questId as string, sourceIds);
+      }
+    }
+
+    return unlockSources;
+  }
+
+  private isQuestUnlocked(
+    definition: { id: string; kind: string },
+    completedQuestIds: Set<string>,
+    unlockSources: Map<string, string[]>,
+  ) {
+    if (definition.kind !== 'QUEST') return true;
+    const sourceIds = unlockSources.get(definition.id) ?? [];
+    if (sourceIds.length === 0) return true;
+    return sourceIds.some((sourceId) => completedQuestIds.has(sourceId));
+  }
+
+  private isOneOffQuestCompleted(
+    definition: { id: string; kind: string; questData: unknown },
+    completedQuestIds: Set<string>,
+  ) {
+    if (definition.kind !== 'QUEST') return false;
+    const questData = this.readQuestData(definition.questData);
+    return Boolean(questData?.isOneOff && completedQuestIds.has(definition.id));
+  }
+
+  private toCharacterStats(character: Record<string, unknown>): CharacterStats {
+    return {
+      id: String(character.id),
+      name: String(character.name),
+      credits: Number(character.credits ?? 0),
+      health: Number(character.health ?? 0),
+      maxHealth: Number(character.maxHealth ?? character.health ?? 0),
+      energy: Number(character.energy ?? 0),
+      maxEnergy: Number(character.maxEnergy ?? character.energy ?? 0),
+      wantedLevel: Number(character.wantedLevel ?? 0),
+      strength: Number(character.strength ?? 0),
+      agility: Number(character.agility ?? 0),
+      intelligence: Number(character.intelligence ?? 0),
+      charisma: Number(character.charisma ?? 0),
+      hacking: Number(character.hacking ?? 0),
+      combat: Number(character.combat ?? 0),
+      stealth: Number(character.stealth ?? 0),
+      engineering: Number(character.engineering ?? 0),
+      reputation: Number(character.reputation ?? 0),
+    };
+  }
+
+  private readRequirements(value: unknown): Requirement[] {
+    return Array.isArray(value) ? (value as Requirement[]) : [];
+  }
+
+  private readRewards(value: unknown): RewardEntry[] {
+    return Array.isArray(value) ? (value as RewardEntry[]) : [];
+  }
+
+  private readQuestData(value: unknown): QuestDataEntry | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    return value as QuestDataEntry;
+  }
+
+  private describeFailedRequirement(
+    requirement: Requirement,
+    character: Record<string, unknown>,
+    context: RequirementContext,
+  ) {
+    switch (requirement.type) {
+      case 'STAT_MIN': {
+        const current = Number(character[requirement.key as keyof typeof character] ?? 0);
+        return `Requirement not met: ${requirement.key} must be >= ${requirement.value} (current: ${current})`;
+      }
+      case 'STAT_MAX': {
+        const current = Number(character[requirement.key as keyof typeof character] ?? 0);
+        return `Requirement not met: ${requirement.key} must be <= ${requirement.value} (current: ${current})`;
+      }
+      case 'CREDITS_MIN':
+        return `Requirement not met: credits must be >= ${requirement.value} (current: ${character.credits})`;
+      case 'FACTION_REPUTATION_MIN':
+      case 'RELATIONSHIP_MIN': {
+        const current = requirement.id
+          ? (requirement.scope === 'CORPORATION'
+              ? context.corporationReputations?.[requirement.id]
+              : context.factionReputations?.[requirement.id]) ?? 0
+          : 0;
+        return `Requirement not met: reputation must be >= ${requirement.value} (current: ${current})`;
+      }
+      case 'FACTION_REPUTATION_MAX':
+      case 'CORPORATION_REPUTATION_MAX':
+      case 'RELATIONSHIP_MAX': {
+        const current = requirement.id
+          ? (requirement.scope === 'CORPORATION' || requirement.type === 'CORPORATION_REPUTATION_MAX'
+              ? context.corporationReputations?.[requirement.id]
+              : context.factionReputations?.[requirement.id]) ?? 0
+          : 0;
+        return `Requirement not met: reputation must be <= ${requirement.value} (current: ${current})`;
+      }
+      case 'CORPORATION_REPUTATION_MIN': {
+        const current = requirement.id
+          ? context.corporationReputations?.[requirement.id] ?? 0
+          : 0;
+        return `Requirement not met: corporation reputation must be >= ${requirement.value} (current: ${current})`;
+      }
+      case 'QUEST_COMPLETED':
+        return 'Requirement not met: complete the prerequisite quest chain first';
+      default:
+        return `Requirement not met: ${requirement.type}`;
     }
   }
 }

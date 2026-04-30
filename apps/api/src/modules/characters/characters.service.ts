@@ -12,6 +12,89 @@ import { assessTravel } from './travel.utils';
 export class CharactersService {
   constructor(private prisma: PrismaService) {}
 
+  private async getTravelStandingAdjustment(
+    characterId: string,
+    district: {
+      name: string;
+      controllingFactionId?: string | null;
+      controllingFaction?: { name: string } | null;
+    },
+  ) {
+    if (!district.controllingFactionId) {
+      return {
+        blocked: false,
+        travelSurcharge: 0,
+        controllingFactionName: null,
+        reputationScore: 0,
+        reputationModifier: 'NEUTRAL' as const,
+        warnings: [] as string[],
+      };
+    }
+
+    const relationship = await this.prisma.relationship.findFirst({
+      where: {
+        sourceType: 'CHARACTER',
+        sourceId: characterId,
+        targetType: 'FACTION',
+        targetId: district.controllingFactionId,
+        relationshipType: 'REPUTATION',
+      },
+    });
+
+    const reputationScore = Math.round(relationship?.value ?? 0);
+    const controllingFactionName = district.controllingFaction?.name ?? null;
+
+    if (reputationScore <= -20) {
+      return {
+        blocked: true,
+        travelSurcharge: 0,
+        controllingFactionName,
+        reputationScore,
+        reputationModifier: 'LOCKED' as const,
+        warnings: [
+          `${controllingFactionName ?? 'District security'} refuses entry at your current standing.`,
+        ],
+      };
+    }
+
+    if (reputationScore < 0) {
+      return {
+        blocked: false,
+        travelSurcharge: Math.max(10, Math.abs(reputationScore) * 2),
+        controllingFactionName,
+        reputationScore,
+        reputationModifier: 'SURCHARGE' as const,
+        warnings: [
+          `${controllingFactionName ?? 'District security'} will charge a hostile-standing access fee.`,
+        ],
+      };
+    }
+
+    if (reputationScore >= 25) {
+      return {
+        blocked: false,
+        travelSurcharge: 0,
+        controllingFactionName,
+        reputationScore,
+        reputationModifier: 'PRIVILEGED' as const,
+        warnings: [
+          `${controllingFactionName ?? 'District security'} recognises you as trusted local traffic.`,
+        ],
+      };
+    }
+
+    return {
+      blocked: false,
+      travelSurcharge: 0,
+      controllingFactionName,
+      reputationScore,
+      reputationModifier: 'NEUTRAL' as const,
+      warnings: controllingFactionName
+        ? [`${controllingFactionName} controls this district.`]
+        : [],
+    };
+  }
+
   async findById(id: string, playerId: string) {
     const character = await this.prisma.character.findUnique({
       where: { id },
@@ -103,7 +186,7 @@ export class CharactersService {
       this.prisma.planet.findUnique({ where: { id: destinationPlanetId } }),
       this.prisma.district.findUnique({
         where: { id: destinationDistrictId },
-        include: { planet: true },
+        include: { planet: true, controllingFaction: true },
       }),
     ]);
     if (!destinationPlanet) throw new NotFoundException('Planet not found');
@@ -123,8 +206,14 @@ export class CharactersService {
       currentDistrictDanger: character.currentDistrict?.dangerLevel,
     });
 
+    const standing = await this.getTravelStandingAdjustment(id, destinationDistrict);
+    const travelCost = travel.travelCost + standing.travelSurcharge;
+
     return {
       ...travel,
+      travelCost,
+      travelSurcharge: standing.travelSurcharge,
+      blocked: standing.blocked,
       destination: {
         planetId: destinationPlanet.id,
         planetName: destinationPlanet.name,
@@ -132,8 +221,12 @@ export class CharactersService {
         districtName: destinationDistrict.name,
         buildingId: dto.buildingId ?? null,
       },
-      affordable: character.credits >= travel.travelCost,
+      affordable: !standing.blocked && character.credits >= travelCost,
       currentCredits: character.credits,
+      controllingFactionName: standing.controllingFactionName,
+      reputationScore: standing.reputationScore,
+      reputationModifier: standing.reputationModifier,
+      warnings: standing.warnings,
     };
   }
 
@@ -341,16 +434,23 @@ export class CharactersService {
       currentDistrictDanger: character.currentDistrict?.dangerLevel,
     });
 
-    if (character.credits < travel.travelCost) {
+    const standing = await this.getTravelStandingAdjustment(id, destinationDistrict);
+    if (standing.blocked) {
+      throw new BadRequestException(standing.warnings[0] ?? 'Travel is blocked by local control');
+    }
+
+    const travelCost = travel.travelCost + standing.travelSurcharge;
+
+    if (character.credits < travelCost) {
       throw new BadRequestException(
-        `Travel requires ${travel.travelCost} credits (current: ${character.credits})`,
+        `Travel requires ${travelCost} credits (current: ${character.credits})`,
       );
     }
 
     const updated = await this.prisma.character.update({
       where: { id },
       data: {
-        credits: character.credits - travel.travelCost,
+        credits: character.credits - travelCost,
         energy: Math.max(0, character.energy + travel.travelEnergyDelta),
         wantedLevel: Math.max(0, character.wantedLevel + travel.wantedDelta),
         currentPlanetId: destinationPlanet.id,
@@ -373,7 +473,16 @@ export class CharactersService {
               districtId: destinationDistrict.id,
               buildingId: destinationBuilding?.id ?? null,
             },
-            travel: { ...travel },
+            travel: {
+              ...travel,
+              travelCost,
+              travelSurcharge: standing.travelSurcharge,
+              blocked: false,
+              controllingFactionName: standing.controllingFactionName,
+              reputationScore: standing.reputationScore,
+              reputationModifier: standing.reputationModifier,
+              warnings: standing.warnings,
+            },
             controllingFaction: destinationDistrict.controllingFaction?.name ?? null,
           } as unknown as Prisma.JsonObject,
         },
@@ -384,6 +493,13 @@ export class CharactersService {
       character: updated,
       travel: {
         ...travel,
+        travelCost,
+        travelSurcharge: standing.travelSurcharge,
+        blocked: false,
+        controllingFactionName: standing.controllingFactionName,
+        reputationScore: standing.reputationScore,
+        reputationModifier: standing.reputationModifier,
+        warnings: standing.warnings,
         destination: {
           planetId: destinationPlanet.id,
           planetName: destinationPlanet.name,

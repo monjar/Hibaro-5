@@ -6,37 +6,6 @@ This file tracks planned work, active design decisions, and future ideas. Each i
 
 ## Up Next
 
-### 1. WebSockets / SSE — Push Updates
-Replace browser polling with server-sent events or WebSockets so opportunity completions and world-tick results arrive instantly.
-
-**Files to edit:**
-- `apps/api/src/` — add `@nestjs/platform-socket.io` or use NestJS `EventEmitter` + SSE `@Sse()` endpoints
-- `apps/api/src/modules/simulation/simulation.service.ts` — emit events after each tick step
-- `apps/web/src/lib/` — add `useEventStream(url)` hook consuming `EventSource`
-- `apps/web/src/app/page.tsx` (dashboard) and `apps/web/src/app/opportunities/page.tsx` — replace `useAutoRefresh` polling with the SSE hook
-
----
-
-### 2. Quest Chains
-Multi-step quests with prerequisites, branching outcomes, and story text.
-
-**Files to edit:**
-- `prisma/schema.prisma` — add `parentOpportunityId` or a `QuestChain` model with ordered steps
-- `apps/api/src/modules/opportunities/opportunities.service.ts` — unlock next step on resolution
-- `apps/web/src/app/opportunities/page.tsx` — show quest chain progress
-
----
-
-### 3. Reputation Perks and Lockouts
-High faction/corp reputation unlocks vendors, routes, and missions. Low standing triggers lockouts and travel surcharges.
-
-**Files to edit:**
-- `packages/game-rules/src/` — `checkRequirement()` already handles `RELATIONSHIP_MIN`; extend to `RELATIONSHIP_MAX` lockouts
-- `apps/api/src/modules/characters/characters.service.ts` `travel()` — check faction control of destination district and apply surcharge or block
-- `apps/web/src/app/travel/page.tsx` — show reputation-based warnings in the travel quote panel
-
----
-
 ### 4. Player Housing
 Rent a safehouse for persistent item storage and passive energy/wanted-level recovery bonuses.
 
@@ -89,6 +58,10 @@ Run the BullMQ worker (`apps/worker`) through Docker Compose for sharded backgro
 ---
 
 ## Shipped
+
+- **1. Realtime tick updates via SSE** — `GET /simulation/stream` now publishes `simulation.tick.completed` plus notable NPC activity as server-sent events. The player dashboard and opportunity board subscribe through `apps/web/src/lib/use-event-stream.ts`, so due completions arrive without the old 12-second polling loop.
+- **2. Quest chains and prerequisite unlocks** — Opportunity availability now respects completed-quest history, `UNLOCK_QUEST` reward edges, one-off quest completion, and shared requirement checks. The seeded story line is now a 3-step chain (`Welcome to Antrolus` → `Something in the Cargo` → `Pigeon95 Secret`) with `questData.chainId`, step counts, and board-side progress/hint display.
+- **3. Reputation perks, lockouts, and route penalties** — Shared requirement logic now supports maximum reputation lockouts (`RELATIONSHIP_MAX`, `FACTION_REPUTATION_MAX`, `CORPORATION_REPUTATION_MAX`), opportunity acceptance enforces those rules server-side, and travel quotes apply faction-control standing checks with hostile surcharges or outright district lockouts.
 
 - **Admin CRUD — full coverage** — Opportunities, Locations (planets/districts/buildings), Factions, Corporations, World Events, and Item Definitions all expose `POST/PATCH/DELETE` with referential-integrity checks (e.g. you can't delete a planet that still has districts or characters on it). Admin pages live at `apps/admin/src/app/<entity>/page.tsx`, share the `AdminShell` chrome, and call typed SDK methods. All admin writes are gated by an `AdminGuard` (`apps/api/src/modules/auth/admin.guard.ts`) — set `ADMIN_TOKEN` in `.env` and enter the same value in the admin header to authorise. Leaving `ADMIN_TOKEN` blank disables the gate for local dev.
 - **Multi-step character creation** — Backstory archetypes (Ex-Soldier, Smuggler, Corporate Drone, Street Hacker, Drifter) with stat bonuses + free 12-point allocation + motivation prompt. Pure logic in `packages/game-rules/src/character-creation.ts` with 12 unit tests.
