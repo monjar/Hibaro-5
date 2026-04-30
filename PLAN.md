@@ -6,22 +6,7 @@ This file tracks planned work, active design decisions, and future ideas. Each i
 
 ## Up Next
 
-### 1. Admin CRUD — Remaining Entities
-Opportunities CRUD shipped. Locations, Factions, Corporations, World Events, and Item Definitions still need create/update/delete endpoints + admin forms.
-
-**Files to edit (per entity):**
-- `apps/api/src/modules/locations/locations.controller.ts` + `locations.service.ts` — add POST/PATCH/DELETE for planets, districts, buildings
-- `apps/api/src/modules/factions/factions.controller.ts` + `factions.service.ts`
-- `apps/api/src/modules/corporations/corporations.controller.ts` + `corporations.service.ts`
-- `apps/api/src/modules/world-events/world-events.controller.ts`
-- `apps/api/src/modules/items/items.controller.ts` + `items.service.ts`
-- `apps/admin/src/app/[entity]/page.tsx` — follow the pattern in `apps/admin/src/app/opportunities/page.tsx`
-- `packages/platform-sdk/src/index.ts` — add SDK methods for each new endpoint
-- **Security note:** the opportunities CRUD endpoints currently have no auth check. Add an `AdminGuard` or shared admin token before exposing these to non-localhost deployments.
-
----
-
-### 2. WebSockets / SSE — Push Updates
+### 1. WebSockets / SSE — Push Updates
 Replace browser polling with server-sent events or WebSockets so opportunity completions and world-tick results arrive instantly.
 
 **Files to edit:**
@@ -32,7 +17,7 @@ Replace browser polling with server-sent events or WebSockets so opportunity com
 
 ---
 
-### 3. Quest Chains
+### 2. Quest Chains
 Multi-step quests with prerequisites, branching outcomes, and story text.
 
 **Files to edit:**
@@ -42,7 +27,7 @@ Multi-step quests with prerequisites, branching outcomes, and story text.
 
 ---
 
-### 4. Reputation Perks and Lockouts
+### 3. Reputation Perks and Lockouts
 High faction/corp reputation unlocks vendors, routes, and missions. Low standing triggers lockouts and travel surcharges.
 
 **Files to edit:**
@@ -52,7 +37,7 @@ High faction/corp reputation unlocks vendors, routes, and missions. Low standing
 
 ---
 
-### 5. Player Housing
+### 4. Player Housing
 Rent a safehouse for persistent item storage and passive energy/wanted-level recovery bonuses.
 
 **Files to edit:**
@@ -62,7 +47,7 @@ Rent a safehouse for persistent item storage and passive energy/wanted-level rec
 
 ---
 
-### 6. Faction Wars
+### 5. Faction Wars
 Factions actively compete for district control each tick based on influence and world events.
 
 **Files to edit:**
@@ -71,7 +56,7 @@ Factions actively compete for district control each tick based on influence and 
 
 ---
 
-### 7. Replayable Ticks
+### 6. Replayable Ticks
 Persist random seeds per tick and expose replay tooling for balance testing.
 
 **Files to edit:**
@@ -105,11 +90,11 @@ Run the BullMQ worker (`apps/worker`) through Docker Compose for sharded backgro
 
 ## Shipped
 
+- **Admin CRUD — full coverage** — Opportunities, Locations (planets/districts/buildings), Factions, Corporations, World Events, and Item Definitions all expose `POST/PATCH/DELETE` with referential-integrity checks (e.g. you can't delete a planet that still has districts or characters on it). Admin pages live at `apps/admin/src/app/<entity>/page.tsx`, share the `AdminShell` chrome, and call typed SDK methods. All admin writes are gated by an `AdminGuard` (`apps/api/src/modules/auth/admin.guard.ts`) — set `ADMIN_TOKEN` in `.env` and enter the same value in the admin header to authorise. Leaving `ADMIN_TOKEN` blank disables the gate for local dev.
 - **Multi-step character creation** — Backstory archetypes (Ex-Soldier, Smuggler, Corporate Drone, Street Hacker, Drifter) with stat bonuses + free 12-point allocation + motivation prompt. Pure logic in `packages/game-rules/src/character-creation.ts` with 12 unit tests.
 - **Single active activity** — Players can only work one gig/job/quest at a time; UI shows "BUSY" on accept buttons. 8 unit tests covering accept paths.
 - **Jobs vs Gigs** — JOB-kind opportunities require a hire step (`POST /jobs/:opportunityId/hire`) and produce a `JobEmployment` row. Each shift is a normal accept→resolve. The world-tick scheduler issues strikes for missed shifts (default 24h cadence) with a credit penalty; 3 strikes = FIRED. Pure tick logic in `packages/game-rules/src/jobs.ts` with 6 tests.
 - **Stock market visibility** — `StockPriceHistory` records per-tick prices; `/stocks/market` returns delta + percent change + 24-point sparkline. Player market page renders tiny SVG sparklines and ▲/▼ deltas. Deterministic random-walk price function in `packages/game-rules/src/stock-prices.ts` (6 tests).
-- **Admin CRUD for opportunities** — `apps/admin/src/app/opportunities/page.tsx` provides create/edit/delete with JSON editors for requirements, rewards, risks, repeatability. `POST/PATCH/DELETE /opportunities/:id` on the API.
 - Player web app (dashboard, opportunities, inventory, shop, travel, stock market, activity log)
 - JWT authentication — register/login/me, browser session with localStorage
 - Admin panel — Next.js control plane at `localhost:3002`

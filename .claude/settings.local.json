@@ -4,7 +4,10 @@
       "Bash(npx prisma *)",
       "Bash(npx tsc *)",
       "Bash(npm test *)",
-      "Bash(npx jest *)"
+      "Bash(npx jest *)",
+      "Bash(npm run *)",
+      "Bash(npx prettier *)",
+      "Bash(git stash *)"
     ]
   }
 }

@@ -56,7 +56,7 @@ export default function TravelPage() {
 
   useEffect(() => {
     void (async () => {
-      const list = (await api.getPlanets()) as PlanetEntry[];
+      const list = (await api.getPlanets()) as unknown as PlanetEntry[];
       setPlanets(list);
     })();
   }, []);
@@ -67,14 +67,14 @@ export default function TravelPage() {
       return;
     }
     void (async () => {
-      const planet = (await api.getPlanet(selectedPlanet.id)) as PlanetEntry;
+      const planet = (await api.getPlanet(selectedPlanet.id)) as unknown as PlanetEntry;
       setSelectedPlanet(planet);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPlanet?.id]);
 
   async function loadDistrict(districtId: string) {
-    const d = (await api.getDistrict(districtId)) as DistrictEntry;
+    const d = (await api.getDistrict(districtId)) as unknown as DistrictEntry;
     setDistrictDetail(d);
   }
 

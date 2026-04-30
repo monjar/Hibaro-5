@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { AdminGuard } from '../auth/admin.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthenticatedPlayer } from '../auth/auth.service';
 import { CurrentPlayer } from '../auth/current-player.decorator';
@@ -54,6 +55,7 @@ export class OpportunitiesController {
   }
 
   @Post()
+  @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Create a new opportunity definition (admin)' })
   create(@Body() body: AdminOpportunityInput) {
     return this.opportunitiesService.createDefinition(body);
@@ -80,12 +82,14 @@ export class OpportunitiesController {
   }
 
   @Patch(':id')
+  @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Update an opportunity definition (admin)' })
   update(@Param('id') id: string, @Body() body: Partial<AdminOpportunityInput>) {
     return this.opportunitiesService.updateDefinition(id, body);
   }
 
   @Delete(':id')
+  @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Delete an opportunity definition (admin)' })
   remove(@Param('id') id: string) {
     return this.opportunitiesService.deleteDefinition(id);

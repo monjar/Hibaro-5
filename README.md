@@ -147,6 +147,7 @@ npm run dev:admin
 | `NODE_ENV` | `development` | Environment mode |
 | `JWT_SECRET` | `dev-secret` | Required — JWT signing key |
 | `JWT_EXPIRES_IN` | `1d` | JWT validity duration |
+| `ADMIN_TOKEN` | _(unset)_ | Shared secret for admin CRUD endpoints. When unset, admin writes are open (local dev). Set to any string to gate POST/PATCH/DELETE on opportunities, locations, factions, corporations, world events, and item definitions. |
 | `SIMULATION_AUTO_TICK` | `true` | Set to `false` to disable the in-process world-tick scheduler |
 | `SIMULATION_TICK_INTERVAL_MS` | `30000` | Auto-tick interval |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:3000` | API base URL the web/admin apps point at |
@@ -257,35 +258,58 @@ POST /stocks/sell                 # Sell shares (JWT required)
 
 ### Locations
 ```
-GET /locations/solar-systems   # All solar systems
-GET /locations/planets         # All planets
-GET /locations/planets/:id     # Planet with districts
-GET /locations/districts/:id   # District with buildings
-GET /locations/buildings/:id   # Building details
+GET    /locations/solar-systems   # All solar systems
+GET    /locations/planets         # All planets
+GET    /locations/planets/:id     # Planet with districts
+GET    /locations/districts       # All districts (admin)
+GET    /locations/districts/:id   # District with buildings
+GET    /locations/buildings       # All buildings (admin)
+GET    /locations/buildings/:id   # Building details
+POST   /locations/planets         # Create a planet (admin)
+PATCH  /locations/planets/:id     # Update a planet (admin)
+DELETE /locations/planets/:id     # Delete a planet (admin)
+POST   /locations/districts       # Create a district (admin)
+PATCH  /locations/districts/:id   # Update a district (admin)
+DELETE /locations/districts/:id   # Delete a district (admin)
+POST   /locations/buildings       # Create a building (admin)
+PATCH  /locations/buildings/:id   # Update a building (admin)
+DELETE /locations/buildings/:id   # Delete a building (admin)
 ```
 
 ### Factions & Corporations
 ```
-GET /factions                  # All factions
-GET /factions/:id              # Faction details
-GET /corporations              # All corporations
-GET /corporations/:id          # Corporation details
+GET    /factions                  # All factions
+GET    /factions/:id              # Faction details
+POST   /factions                  # Create a faction (admin)
+PATCH  /factions/:id              # Update a faction (admin)
+DELETE /factions/:id              # Delete a faction (admin)
+GET    /corporations              # All corporations
+GET    /corporations/:id          # Corporation details
+POST   /corporations              # Create a corporation (admin)
+PATCH  /corporations/:id          # Update a corporation (admin)
+DELETE /corporations/:id          # Delete a corporation (admin)
 ```
 
 ### Items
 ```
-GET /items/definitions         # All item definitions
-GET /items/definitions/:id     # Item definition by ID
+GET    /items/definitions         # All item definitions
+GET    /items/definitions/:id     # Item definition by ID
+POST   /items/definitions         # Create an item definition (admin)
+PATCH  /items/definitions/:id     # Update an item definition (admin)
+DELETE /items/definitions/:id     # Delete an item definition (admin)
 ```
 
 ### Opportunities
 ```
-GET  /opportunities                          # All opportunity definitions
-GET  /opportunities/available/:characterId   # Available for your character (JWT required)
-GET  /opportunities/instances/:characterId   # Your accepted opportunities (JWT required)
-POST /opportunities/:opportunityId/accept    # Accept opportunity for your character (JWT required)
+GET    /opportunities                          # All opportunity definitions
+GET    /opportunities/available/:characterId   # Available for your character (JWT required)
+GET    /opportunities/instances/:characterId   # Your accepted opportunities (JWT required)
+POST   /opportunities/:opportunityId/accept    # Accept opportunity for your character (JWT required)
   Body: { "characterId": "..." }
-POST /opportunities/instances/:instanceId/resolve  # Manually resolve your instance (JWT required)
+POST   /opportunities/instances/:instanceId/resolve  # Manually resolve your instance (JWT required)
+POST   /opportunities                          # Create an opportunity definition (admin)
+PATCH  /opportunities/:id                      # Update an opportunity definition (admin)
+DELETE /opportunities/:id                      # Delete an opportunity definition (admin)
 ```
 
 ### Simulation
@@ -298,8 +322,12 @@ GET  /simulation/realtime-contracts  # Shared realtime event contracts
 
 ### World Events
 ```
-GET /world-events              # All world events
-GET /world-events/active       # Currently active events
+GET    /world-events              # All world events
+GET    /world-events/active       # Currently active events
+GET    /world-events/:id          # World event details
+POST   /world-events              # Create a world event (admin)
+PATCH  /world-events/:id          # Update a world event (admin)
+DELETE /world-events/:id          # Delete a world event (admin)
 ```
 
 ## Example Gameplay Flow (Browser)
@@ -361,6 +389,22 @@ curl -X POST http://localhost:3000/simulation/tick
 ```bash
 curl http://localhost:3000/simulation/world-state
 ```
+
+## Admin Control Plane
+
+The Next.js admin app at http://localhost:3002 manages every CMS-style entity in the world:
+
+- **Overview** (`/`) — tick history, market state, district control, NPC activity, realtime contracts.
+- **Opportunities** (`/opportunities`) — gigs, jobs, quests with JSON editors for requirements, rewards, risks, and JOB cadence.
+- **Locations** (`/locations`) — planets, districts, and buildings under one tabbed page.
+- **Factions** (`/factions`) — name, ideology, treasury, influence, optional HQ building.
+- **Corporations** (`/corporations`) — industry, status, cash/debt/revenue, stock ticker/price/volatility, bankruptcy risk.
+- **World Events** (`/world-events`) — schedule events with scope, effects JSON, and timed activation.
+- **Items** (`/items`) — item definitions with category-specific JSON for weapon/clothing/tool/vehicle data.
+
+Every write goes through `AdminGuard`. To enable the gate, set `ADMIN_TOKEN=<your secret>` in `.env`, restart the API, and paste the same token into the **Admin token** widget at the top of any admin page (it's stored in `localStorage` and sent as `x-admin-token` on every write). With `ADMIN_TOKEN` left blank the admin panel is open — fine for local dev, never deploy that way.
+
+Deletes refuse to cascade silently — for example you can't delete a planet that still has districts or characters on it, or a corporation with active stock holdings. Resolve those references first.
 
 ## Running Tests
 
@@ -434,4 +478,4 @@ See [PLAN.md](PLAN.md) for the full development plan — what's up next, what's 
 - Safehouse / clinic / hub rest — health, energy, wanted-level recovery
 - Consumable items — use from inventory
 - NPC simulation, economy drift, corporation boom/bust, faction district control
-- Admin control plane with tick observability
+- Admin control plane with tick observability **and full CRUD** for opportunities, planets/districts/buildings, factions, corporations, world events, and item definitions — all gated behind an `ADMIN_TOKEN`

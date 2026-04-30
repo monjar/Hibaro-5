@@ -89,6 +89,253 @@ export interface AdminOpportunityInput {
   repeatability?: unknown;
 }
 
+export type PlanetType =
+  | 'TERRESTRIAL'
+  | 'GAS_GIANT'
+  | 'ICE'
+  | 'DESERT'
+  | 'OCEAN'
+  | 'ASTEROID_BELT'
+  | 'STATION';
+
+export interface AdminPlanetInput {
+  solarSystemId: string;
+  name: string;
+  description?: string | null;
+  planetType?: PlanetType;
+  dangerLevel?: number;
+  lawLevel?: number;
+  economyLevel?: number;
+}
+
+export interface AdminDistrictInput {
+  planetId: string;
+  name: string;
+  description?: string | null;
+  controllingFactionId?: string | null;
+  dangerLevel?: number;
+  lawLevel?: number;
+  economyLevel?: number;
+}
+
+export type BuildingFunction =
+  | 'SHOP'
+  | 'SAFEHOUSE'
+  | 'OFFICE'
+  | 'HUB'
+  | 'DOCK'
+  | 'BAR'
+  | 'CLINIC'
+  | 'WAREHOUSE'
+  | 'BLACK_MARKET'
+  | 'MISSION_BOARD';
+
+export type BuildingStatus = 'OPEN' | 'CLOSED' | 'DAMAGED' | 'ABANDONED' | 'LOCKED_DOWN';
+
+export type BuildingOwnerType = 'CHARACTER' | 'FACTION' | 'CORPORATION' | 'SYSTEM';
+
+export interface AdminBuildingInput {
+  districtId: string;
+  name: string;
+  description?: string | null;
+  ownerType?: BuildingOwnerType;
+  ownerId?: string | null;
+  functionality?: BuildingFunction[];
+  status?: BuildingStatus;
+}
+
+export interface AdminFactionInput {
+  name: string;
+  description?: string | null;
+  ideology?: string | null;
+  headquartersBuildingId?: string | null;
+  treasury?: number;
+  influence?: number;
+}
+
+export type CorporationIndustry =
+  | 'MINING'
+  | 'WEAPONS'
+  | 'TRANSPORT'
+  | 'CYBERNETICS'
+  | 'FOOD'
+  | 'SECURITY'
+  | 'MEDIA'
+  | 'ENERGY'
+  | 'MEDICAL'
+  | 'LOGISTICS'
+  | 'BLACK_MARKET';
+
+export type CorporationStatus = 'GROWING' | 'STABLE' | 'DECLINING' | 'BANKRUPT';
+
+export interface AdminCorporationInput {
+  name: string;
+  description?: string | null;
+  industry: CorporationIndustry;
+  headquartersBuildingId?: string | null;
+  cash?: number;
+  debt?: number;
+  revenue?: number;
+  riskOfBankruptcy?: number;
+  politicalInfluence?: number;
+  status?: CorporationStatus;
+  stockTicker?: string | null;
+  stockPrice?: number | null;
+  stockVolatility?: number | null;
+}
+
+export type WorldEventScope =
+  | 'CHARACTER'
+  | 'BUILDING'
+  | 'DISTRICT'
+  | 'PLANET'
+  | 'FACTION'
+  | 'CORPORATION'
+  | 'WORLD';
+
+export type WorldEventStatus = 'SCHEDULED' | 'ACTIVE' | 'RESOLVED' | 'CANCELLED';
+
+export interface AdminWorldEventInput {
+  title: string;
+  description?: string | null;
+  scope: WorldEventScope;
+  triggeredByType?: string | null;
+  triggeredById?: string | null;
+  affectedEntities?: unknown[];
+  requirements?: unknown[];
+  effects?: unknown[];
+  startsAt?: string | null;
+  endsAt?: string | null;
+  status?: WorldEventStatus;
+}
+
+export type ItemCategory =
+  | 'TOOL'
+  | 'WEAPON'
+  | 'CLOTHING'
+  | 'VEHICLE'
+  | 'CONSUMABLE'
+  | 'MATERIAL'
+  | 'QUEST_ITEM';
+
+export type ItemRarity = 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY' | 'ILLEGAL';
+
+export interface AdminItemDefinitionInput {
+  name: string;
+  description?: string | null;
+  category: ItemCategory;
+  rarity?: ItemRarity;
+  baseValue?: number;
+  weight?: number;
+  effects?: unknown;
+  requirements?: unknown;
+  weaponData?: unknown;
+  clothingData?: unknown;
+  toolData?: unknown;
+  vehicleData?: unknown;
+}
+
+export interface AdminPlanet {
+  id: string;
+  solarSystemId: string;
+  name: string;
+  description?: string | null;
+  planetType: PlanetType;
+  dangerLevel: number;
+  lawLevel: number;
+  economyLevel: number;
+}
+
+export interface AdminDistrict {
+  id: string;
+  planetId: string;
+  name: string;
+  description?: string | null;
+  controllingFactionId?: string | null;
+  dangerLevel: number;
+  lawLevel: number;
+  economyLevel: number;
+  planet?: { id: string; name: string };
+  controllingFaction?: { id: string; name: string } | null;
+}
+
+export interface AdminBuilding {
+  id: string;
+  districtId: string;
+  name: string;
+  description?: string | null;
+  ownerType: BuildingOwnerType;
+  ownerId?: string | null;
+  functionality: BuildingFunction[];
+  status: BuildingStatus;
+  district?: { id: string; name: string; planet?: { id: string; name: string } };
+}
+
+export interface AdminFaction {
+  id: string;
+  name: string;
+  description?: string | null;
+  ideology?: string | null;
+  headquartersBuildingId?: string | null;
+  treasury: number;
+  influence: number;
+}
+
+export interface AdminCorporation {
+  id: string;
+  name: string;
+  description?: string | null;
+  industry: CorporationIndustry;
+  headquartersBuildingId?: string | null;
+  cash: number;
+  debt: number;
+  revenue: number;
+  riskOfBankruptcy: number;
+  politicalInfluence: number;
+  status: CorporationStatus;
+  stockTicker?: string | null;
+  stockPrice?: number | null;
+  stockVolatility?: number | null;
+}
+
+export interface AdminWorldEvent {
+  id: string;
+  title: string;
+  description?: string | null;
+  scope: WorldEventScope;
+  triggeredByType?: string | null;
+  triggeredById?: string | null;
+  affectedEntities: unknown[];
+  requirements: unknown[];
+  effects: unknown[];
+  startsAt?: string | null;
+  endsAt?: string | null;
+  status: WorldEventStatus;
+}
+
+export interface AdminItemDefinition {
+  id: string;
+  name: string;
+  description?: string | null;
+  category: ItemCategory;
+  rarity: ItemRarity;
+  baseValue: number;
+  weight: number;
+  effects?: unknown;
+  requirements?: unknown;
+  weaponData?: unknown;
+  clothingData?: unknown;
+  toolData?: unknown;
+  vehicleData?: unknown;
+}
+
+export interface SolarSystem {
+  id: string;
+  name: string;
+  description?: string | null;
+  planets?: AdminPlanet[];
+}
+
 export interface JobEmployment {
   id: string;
   characterId: string;
@@ -426,6 +673,7 @@ export interface ApiClientConfig {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   getToken?: () => string | null | undefined;
+  getAdminToken?: () => string | null | undefined;
 }
 
 export async function apiFetch<T>(
@@ -436,12 +684,16 @@ export async function apiFetch<T>(
   const fetchImpl = config.fetchImpl ?? fetch;
   const baseUrl = config.baseUrl ?? DEFAULT_API_URL;
   const token = config.getToken?.() ?? null;
+  const adminToken = config.getAdminToken?.() ?? null;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...((options?.headers as Record<string, string>) ?? {}),
   };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
+  }
+  if (adminToken) {
+    headers['x-admin-token'] = adminToken;
   }
   const response = await fetchImpl(`${baseUrl}${path}`, {
     ...options,
@@ -486,10 +738,90 @@ export function createApiClient(config?: ApiClientConfig) {
     deleteOpportunity: (id: string) =>
       request<{ deleted: boolean; id: string }>(`/opportunities/${id}`, { method: 'DELETE' }),
     runSimulationTick: () => post<SimulationTickSummary>('/simulation/tick'),
-    getPlanets: () => request<unknown[]>('/locations/planets'),
-    getPlanet: (id: string) => request<unknown>(`/locations/planets/${id}`),
-    getDistrict: (id: string) => request<unknown>(`/locations/districts/${id}`),
-    getBuilding: (id: string) => request<unknown>(`/locations/buildings/${id}`),
+    getSolarSystems: () => request<SolarSystem[]>('/locations/solar-systems'),
+    getPlanets: () => request<AdminPlanet[]>('/locations/planets'),
+    getPlanet: (id: string) => request<AdminPlanet>(`/locations/planets/${id}`),
+    getDistricts: () => request<AdminDistrict[]>('/locations/districts'),
+    getDistrict: (id: string) => request<AdminDistrict>(`/locations/districts/${id}`),
+    getBuildings: () => request<AdminBuilding[]>('/locations/buildings'),
+    getBuilding: (id: string) => request<AdminBuilding>(`/locations/buildings/${id}`),
+    createPlanet: (input: AdminPlanetInput) => post<AdminPlanet>('/locations/planets', input),
+    updatePlanet: (id: string, input: Partial<AdminPlanetInput>) =>
+      request<AdminPlanet>(`/locations/planets/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    deletePlanet: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/locations/planets/${id}`, { method: 'DELETE' }),
+    createDistrict: (input: AdminDistrictInput) =>
+      post<AdminDistrict>('/locations/districts', input),
+    updateDistrict: (id: string, input: Partial<AdminDistrictInput>) =>
+      request<AdminDistrict>(`/locations/districts/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    deleteDistrict: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/locations/districts/${id}`, {
+        method: 'DELETE',
+      }),
+    createBuilding: (input: AdminBuildingInput) =>
+      post<AdminBuilding>('/locations/buildings', input),
+    updateBuilding: (id: string, input: Partial<AdminBuildingInput>) =>
+      request<AdminBuilding>(`/locations/buildings/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    deleteBuilding: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/locations/buildings/${id}`, {
+        method: 'DELETE',
+      }),
+    // factions
+    getFactions: () => request<AdminFaction[]>('/factions'),
+    getFaction: (id: string) => request<AdminFaction>(`/factions/${id}`),
+    createFaction: (input: AdminFactionInput) => post<AdminFaction>('/factions', input),
+    updateFaction: (id: string, input: Partial<AdminFactionInput>) =>
+      request<AdminFaction>(`/factions/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    deleteFaction: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/factions/${id}`, { method: 'DELETE' }),
+    // corporations
+    getCorporations: () => request<AdminCorporation[]>('/corporations'),
+    getCorporation: (id: string) => request<AdminCorporation>(`/corporations/${id}`),
+    createCorporation: (input: AdminCorporationInput) =>
+      post<AdminCorporation>('/corporations', input),
+    updateCorporation: (id: string, input: Partial<AdminCorporationInput>) =>
+      request<AdminCorporation>(`/corporations/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    deleteCorporation: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/corporations/${id}`, { method: 'DELETE' }),
+    // world events
+    getWorldEvents: () => request<AdminWorldEvent[]>('/world-events'),
+    getWorldEvent: (id: string) => request<AdminWorldEvent>(`/world-events/${id}`),
+    createWorldEvent: (input: AdminWorldEventInput) =>
+      post<AdminWorldEvent>('/world-events', input),
+    updateWorldEvent: (id: string, input: Partial<AdminWorldEventInput>) =>
+      request<AdminWorldEvent>(`/world-events/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    deleteWorldEvent: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/world-events/${id}`, { method: 'DELETE' }),
+    // item definitions
+    getItemDefinitions: () => request<AdminItemDefinition[]>('/items/definitions'),
+    getItemDefinition: (id: string) => request<AdminItemDefinition>(`/items/definitions/${id}`),
+    createItemDefinition: (input: AdminItemDefinitionInput) =>
+      post<AdminItemDefinition>('/items/definitions', input),
+    updateItemDefinition: (id: string, input: Partial<AdminItemDefinitionInput>) =>
+      request<AdminItemDefinition>(`/items/definitions/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+    deleteItemDefinition: (id: string) =>
+      request<{ deleted: boolean; id: string }>(`/items/definitions/${id}`, { method: 'DELETE' }),
     getStockMarket: () => request<StockQuote[]>('/stocks/market'),
     getStockHistory: (corporationId: string, limit = 30) =>
       request<StockHistory>(`/stocks/history/${corporationId}?limit=${limit}`),
