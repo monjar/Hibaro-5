@@ -1,4 +1,4 @@
-import { Controller, Post, Get } from '@nestjs/common';
+import { Controller, Post, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SimulationService } from './simulation.service';
 
@@ -17,5 +17,17 @@ export class SimulationController {
   @ApiOperation({ summary: 'Get current world state snapshot' })
   worldState() {
     return this.simulationService.getWorldState();
+  }
+
+  @Get('history')
+  @ApiOperation({ summary: 'Get recent simulation tick history' })
+  history(@Query('limit') limit = '10') {
+    return this.simulationService.getHistory(parseInt(limit, 10));
+  }
+
+  @Get('realtime-contracts')
+  @ApiOperation({ summary: 'Get shared realtime event contracts' })
+  realtimeContracts() {
+    return this.simulationService.getRealtimeContracts();
   }
 }

@@ -1,31 +1,35 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import { apiFetch } from '@/lib/api'
+import { useState } from 'react';
+import { apiFetch } from '@/lib/api';
 
 export function SimulationButton() {
-  const [running, setRunning] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
 
   async function runTick() {
-    setRunning(true)
-    setResult(null)
+    setRunning(true);
+    setResult(null);
     try {
-      const data = await apiFetch<{ opportunitiesResolved: number }>('/simulation/tick', { method: 'POST' })
-      setResult(`✅ Tick: ${data.opportunitiesResolved} resolved`)
-      setTimeout(() => setResult(null), 4000)
+      const data = await apiFetch<{ opportunitiesResolved: number }>('/simulation/tick', {
+        method: 'POST',
+      });
+      setResult(`✅ Tick: ${data.opportunitiesResolved} resolved`);
+      setTimeout(() => setResult(null), 4000);
     } catch {
-      setResult('❌ Tick failed')
-      setTimeout(() => setResult(null), 3000)
+      setResult('❌ Tick failed');
+      setTimeout(() => setResult(null), 3000);
     } finally {
-      setRunning(false)
+      setRunning(false);
     }
   }
 
   return (
     <div className="flex items-center gap-2">
       {result && (
-        <span className={`text-xs font-mono ${result.startsWith('✅') ? 'text-heliora-green' : 'text-heliora-red'}`}>
+        <span
+          className={`text-xs font-mono ${result.startsWith('✅') ? 'text-heliora-green' : 'text-heliora-red'}`}
+        >
           {result}
         </span>
       )}
@@ -37,5 +41,5 @@ export function SimulationButton() {
         {running ? '◌ TICKING...' : '▶ SIM TICK'}
       </button>
     </div>
-  )
+  );
 }

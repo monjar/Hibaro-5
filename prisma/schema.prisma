@@ -462,8 +462,8 @@ model Relationship {
 
 model ActivityLog {
   id              String       @id @default(uuid())
-  playerId        String
-  player          Player       @relation(fields: [playerId], references: [id])
+  playerId        String?
+  player          Player?      @relation(fields: [playerId], references: [id])
   characterId     String?
   character       Character?   @relation(fields: [characterId], references: [id])
   type            ActivityType
@@ -471,4 +471,12 @@ model ActivityLog {
   relatedEntities Json?
   metadata        Json?
   createdAt       DateTime     @default(now())
+}
+
+model SimulationTick {
+  id          String   @id @default(uuid())
+  processedAt DateTime @default(now())
+  summary     Json
+  results     Json?
+  createdAt   DateTime @default(now())
 }

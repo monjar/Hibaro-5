@@ -1,27 +1,33 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import { apiFetch, Character, OpportunityDefinition, OpportunityInstance, ActivityLog } from '@/lib/api'
-import { Panel } from './Panel'
-import { StatBar, StatPill } from './StatBar'
-import { KindBadge, StatusBadge } from './KindBadge'
+import { useState } from 'react';
+import {
+  apiFetch,
+  Character,
+  OpportunityDefinition,
+  OpportunityInstance,
+  ActivityLog,
+} from '@/lib/api';
+import { Panel } from './Panel';
+import { StatBar, StatPill } from './StatBar';
+import { KindBadge, StatusBadge } from './KindBadge';
 
 function formatTimeLeft(dateStr: string) {
-  const diff = new Date(dateStr).getTime() - Date.now()
-  if (diff <= 0) return '⚡ Ready!'
-  const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins}m left`
-  return `${Math.floor(mins / 60)}h ${mins % 60}m left`
+  const diff = new Date(dateStr).getTime() - Date.now();
+  if (diff <= 0) return '⚡ Ready!';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m left`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m left`;
 }
 
 function formatTimeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 const ACTIVITY_ICONS: Record<string, string> = {
@@ -36,118 +42,129 @@ const ACTIVITY_ICONS: Record<string, string> = {
   ITEM_BOUGHT: '🛍️',
   WORLD_EVENT_TRIGGERED: '⚡',
   RELATIONSHIP_CHANGED: '🤝',
-}
+};
 
 interface OpportunitiesPanelProps {
-  allOpportunities: OpportunityDefinition[]
+  allOpportunities: OpportunityDefinition[];
 }
 
-type RewardEntry = { type: string; value: number }
-type RequirementEntry = { key?: string; type?: string; value: number }
+type RewardEntry = { type: string; value: number };
+type RequirementEntry = { key?: string; type?: string; value: number };
 type OutcomeEntry = {
-  roll?: number
-  successChance?: number
-  success?: boolean
-  appliedRewards?: RewardEntry[]
-  appliedRisks?: unknown[]
-}
+  roll?: number;
+  successChance?: number;
+  success?: boolean;
+  appliedRewards?: RewardEntry[];
+  appliedRisks?: unknown[];
+};
 
 export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps) {
-  const [characterId, setCharacterId] = useState('')
-  const [character, setCharacter] = useState<Character | null>(null)
-  const [available, setAvailable] = useState<OpportunityDefinition[]>([])
-  const [instances, setInstances] = useState<OpportunityInstance[]>([])
-  const [activity, setActivity] = useState<ActivityLog[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [accepting, setAccepting] = useState<string | null>(null)
-  const [resolving, setResolving] = useState<string | null>(null)
-  const [message, setMessage] = useState('')
+  const [characterId, setCharacterId] = useState('');
+  const [character, setCharacter] = useState<Character | null>(null);
+  const [available, setAvailable] = useState<OpportunityDefinition[]>([]);
+  const [instances, setInstances] = useState<OpportunityInstance[]>([]);
+  const [activity, setActivity] = useState<ActivityLog[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [accepting, setAccepting] = useState<string | null>(null);
+  const [resolving, setResolving] = useState<string | null>(null);
+  const [message, setMessage] = useState('');
 
   async function loadCharacter(id: string) {
-    if (!id.trim()) return
-    setLoading(true)
-    setError('')
+    if (!id.trim()) return;
+    setLoading(true);
+    setError('');
     try {
-      const charData = await apiFetch<Character>(`/characters/${id}`)
+      const charData = await apiFetch<Character>(`/characters/${id}`);
       const [instData, availData] = await Promise.all([
         apiFetch<OpportunityInstance[]>(`/opportunities/instances/${id}`),
         apiFetch<OpportunityDefinition[]>(`/opportunities/available/${id}`),
-      ])
-      setCharacter(charData)
-      setInstances(instData)
-      setAvailable(availData)
+      ]);
+      setCharacter(charData);
+      setInstances(instData);
+      setAvailable(availData);
 
       if (charData.playerId) {
-        const actData = await apiFetch<{ logs: ActivityLog[] }>(`/players/${charData.playerId}/activity`)
-        setActivity(actData.logs || [])
+        const actData = await apiFetch<{ logs: ActivityLog[] }>(
+          `/players/${charData.playerId}/activity`,
+        );
+        setActivity(actData.logs || []);
       }
     } catch (e) {
-      setError((e as Error).message)
-      setCharacter(null)
+      setError((e as Error).message);
+      setCharacter(null);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   async function acceptOpportunity(opportunityId: string) {
-    if (!character) return
-    setAccepting(opportunityId)
-    setMessage('')
+    if (!character) return;
+    setAccepting(opportunityId);
+    setMessage('');
     try {
       await apiFetch(`/opportunities/${opportunityId}/accept`, {
         method: 'POST',
         body: JSON.stringify({ characterId: character.id }),
-      })
-      setMessage('✅ Opportunity accepted!')
-      await refreshData()
+      });
+      setMessage('✅ Opportunity accepted!');
+      await refreshData();
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message}`)
+      setMessage(`❌ ${(e as Error).message}`);
     } finally {
-      setAccepting(null)
+      setAccepting(null);
     }
   }
 
   async function resolveInstance(instanceId: string) {
-    setResolving(instanceId)
-    setMessage('')
+    setResolving(instanceId);
+    setMessage('');
     try {
-      const result = await apiFetch<{ outcome: OutcomeEntry; definition: OpportunityDefinition }>(`/opportunities/instances/${instanceId}/resolve`, {
-        method: 'POST',
-      })
-      const outcome = result.outcome
+      const result = await apiFetch<{ outcome: OutcomeEntry; definition: OpportunityDefinition }>(
+        `/opportunities/instances/${instanceId}/resolve`,
+        {
+          method: 'POST',
+        },
+      );
+      const outcome = result.outcome;
       if (outcome?.success) {
-        const credits = outcome.appliedRewards?.find((r) => r.type === 'CREDITS')
-        setMessage(`✅ Success! ${credits ? `+$${credits.value}` : ''} ${result.definition?.title}`)
+        const credits = outcome.appliedRewards?.find((r) => r.type === 'CREDITS');
+        setMessage(
+          `✅ Success! ${credits ? `+$${credits.value}` : ''} ${result.definition?.title}`,
+        );
       } else {
-        setMessage(`❌ Failed: ${result.definition?.title}. ${outcome?.appliedRisks?.length ? 'Risks applied.' : ''}`)
+        setMessage(
+          `❌ Failed: ${result.definition?.title}. ${outcome?.appliedRisks?.length ? 'Risks applied.' : ''}`,
+        );
       }
-      await refreshData()
+      await refreshData();
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message}`)
+      setMessage(`❌ ${(e as Error).message}`);
     } finally {
-      setResolving(null)
+      setResolving(null);
     }
   }
 
   async function refreshData() {
-    if (!character) return
+    if (!character) return;
     const [charData, instData, availData] = await Promise.all([
       apiFetch<Character>(`/characters/${character.id}`),
       apiFetch<OpportunityInstance[]>(`/opportunities/instances/${character.id}`),
       apiFetch<OpportunityDefinition[]>(`/opportunities/available/${character.id}`),
-    ])
-    setCharacter(charData)
-    setInstances(instData)
-    setAvailable(availData)
+    ]);
+    setCharacter(charData);
+    setInstances(instData);
+    setAvailable(availData);
     if (charData.playerId) {
-      const actData = await apiFetch<{ logs: ActivityLog[] }>(`/players/${charData.playerId}/activity`)
-      setActivity(actData.logs || [])
+      const actData = await apiFetch<{ logs: ActivityLog[] }>(
+        `/players/${charData.playerId}/activity`,
+      );
+      setActivity(actData.logs || []);
     }
   }
 
-  const inProgress = instances.filter(i => i.status === 'IN_PROGRESS' || i.status === 'ACCEPTED')
-  const completed = instances.filter(i => i.status === 'COMPLETED' || i.status === 'FAILED')
+  const inProgress = instances.filter((i) => i.status === 'IN_PROGRESS' || i.status === 'ACCEPTED');
+  const completed = instances.filter((i) => i.status === 'COMPLETED' || i.status === 'FAILED');
 
   return (
     <div className="space-y-6">
@@ -172,13 +189,16 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
         </div>
         {error && <p className="mt-2 text-heliora-red text-xs">{error}</p>}
         <p className="mt-2 text-heliora-text-dim text-xs">
-          Run <code className="text-heliora-cyan">npm run db:seed</code> then check the console output for your Character ID.
+          Run <code className="text-heliora-cyan">npm run db:seed</code> then check the console
+          output for your Character ID.
         </p>
       </Panel>
 
       {/* Message notification */}
       {message && (
-        <div className={`border rounded p-3 text-sm font-mono ${message.startsWith('✅') ? 'border-heliora-green/40 bg-heliora-green/10 text-heliora-green' : 'border-heliora-red/40 bg-heliora-red/10 text-heliora-red'}`}>
+        <div
+          className={`border rounded p-3 text-sm font-mono ${message.startsWith('✅') ? 'border-heliora-green/40 bg-heliora-green/10 text-heliora-green' : 'border-heliora-red/40 bg-heliora-red/10 text-heliora-red'}`}
+        >
           {message}
         </div>
       )}
@@ -195,18 +215,34 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
               </div>
               <div className="grid grid-cols-2 gap-2 mb-4 text-sm">
                 <div className="bg-heliora-dark rounded p-2 border border-heliora-border">
-                  <div className="text-heliora-green font-bold font-mono">${character.credits.toFixed(0)}</div>
+                  <div className="text-heliora-green font-bold font-mono">
+                    ${character.credits.toFixed(0)}
+                  </div>
                   <div className="text-heliora-text-dim text-xs">Credits</div>
                 </div>
-                <div className={`bg-heliora-dark rounded p-2 border ${character.wantedLevel > 0 ? 'border-heliora-red/50' : 'border-heliora-border'}`}>
-                  <div className={`font-bold font-mono ${character.wantedLevel > 0 ? 'text-heliora-red' : 'text-heliora-text'}`}>
+                <div
+                  className={`bg-heliora-dark rounded p-2 border ${character.wantedLevel > 0 ? 'border-heliora-red/50' : 'border-heliora-border'}`}
+                >
+                  <div
+                    className={`font-bold font-mono ${character.wantedLevel > 0 ? 'text-heliora-red' : 'text-heliora-text'}`}
+                  >
                     {character.wantedLevel > 0 ? '★'.repeat(character.wantedLevel) : '✓ Clear'}
                   </div>
                   <div className="text-heliora-text-dim text-xs">Wanted</div>
                 </div>
               </div>
-              <StatBar label="Health" value={character.health} max={character.maxHealth} color="bg-heliora-red" />
-              <StatBar label="Energy" value={character.energy} max={character.maxEnergy} color="bg-heliora-cyan" />
+              <StatBar
+                label="Health"
+                value={character.health}
+                max={character.maxHealth}
+                color="bg-heliora-red"
+              />
+              <StatBar
+                label="Energy"
+                value={character.energy}
+                max={character.maxEnergy}
+                color="bg-heliora-cyan"
+              />
             </Panel>
 
             {/* Stats */}
@@ -227,16 +263,28 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
             <Panel title="Location" accent="cyan">
               <div className="space-y-3">
                 <div className="border-l-2 border-heliora-teal pl-3">
-                  <div className="text-heliora-text-dim text-xs uppercase tracking-wider">Planet</div>
-                  <div className="text-heliora-text font-mono">{character.currentPlanet?.name || '—'}</div>
+                  <div className="text-heliora-text-dim text-xs uppercase tracking-wider">
+                    Planet
+                  </div>
+                  <div className="text-heliora-text font-mono">
+                    {character.currentPlanet?.name || '—'}
+                  </div>
                 </div>
                 <div className="border-l-2 border-heliora-border pl-3">
-                  <div className="text-heliora-text-dim text-xs uppercase tracking-wider">District</div>
-                  <div className="text-heliora-text font-mono">{character.currentDistrict?.name || '—'}</div>
+                  <div className="text-heliora-text-dim text-xs uppercase tracking-wider">
+                    District
+                  </div>
+                  <div className="text-heliora-text font-mono">
+                    {character.currentDistrict?.name || '—'}
+                  </div>
                 </div>
                 <div className="border-l-2 border-heliora-border pl-3">
-                  <div className="text-heliora-text-dim text-xs uppercase tracking-wider">Building</div>
-                  <div className="text-heliora-text font-mono">{character.currentBuilding?.name || '—'}</div>
+                  <div className="text-heliora-text-dim text-xs uppercase tracking-wider">
+                    Building
+                  </div>
+                  <div className="text-heliora-text font-mono">
+                    {character.currentBuilding?.name || '—'}
+                  </div>
                 </div>
               </div>
               <button
@@ -251,11 +299,16 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
           {/* Available Opportunities */}
           <Panel title={`Available for ${character.name} (${available.length})`} accent="orange">
             {available.length === 0 ? (
-              <p className="text-heliora-text-dim text-sm text-center py-4">No opportunities available or all are in progress.</p>
+              <p className="text-heliora-text-dim text-sm text-center py-4">
+                No opportunities available or all are in progress.
+              </p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {available.map((opp) => (
-                  <div key={opp.id} className="border border-heliora-border rounded p-3 bg-heliora-dark hover:border-heliora-orange/30 transition-colors">
+                  <div
+                    key={opp.id}
+                    className="border border-heliora-border rounded p-3 bg-heliora-dark hover:border-heliora-orange/30 transition-colors"
+                  >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <KindBadge kind={opp.kind} />
@@ -264,13 +317,21 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
                       <span className="text-xs text-heliora-text-dim">Diff: {opp.difficulty}</span>
                     </div>
                     <h3 className="text-heliora-text font-bold text-sm mb-1">{opp.title}</h3>
-                    <p className="text-heliora-text-dim text-xs mb-3 line-clamp-2">{opp.description}</p>
+                    <p className="text-heliora-text-dim text-xs mb-3 line-clamp-2">
+                      {opp.description}
+                    </p>
                     <div className="flex items-center justify-between">
                       <div className="flex flex-wrap gap-2 text-xs">
-                        <span className="text-heliora-text-dim">⏱ {opp.durationMinutes ?? '?'}m</span>
-                        {(opp.rewards as RewardEntry[]).filter((r) => r.type === 'CREDITS').map((r) => (
-                          <span key={r.type} className="text-heliora-green font-bold">+${r.value}</span>
-                        ))}
+                        <span className="text-heliora-text-dim">
+                          ⏱ {opp.durationMinutes ?? '?'}m
+                        </span>
+                        {(opp.rewards as RewardEntry[])
+                          .filter((r) => r.type === 'CREDITS')
+                          .map((r) => (
+                            <span key={r.type} className="text-heliora-green font-bold">
+                              +${r.value}
+                            </span>
+                          ))}
                       </div>
                       <button
                         onClick={() => acceptOpportunity(opp.id)}
@@ -282,7 +343,10 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
                     </div>
                     {opp.requirements.length > 0 && (
                       <div className="mt-2 text-xs text-heliora-yellow border-t border-heliora-border pt-2">
-                        Req: {(opp.requirements as RequirementEntry[]).map((r) => `${r.key ?? r.type} ≥ ${r.value}`).join(', ')}
+                        Req:{' '}
+                        {(opp.requirements as RequirementEntry[])
+                          .map((r) => `${r.key ?? r.type} ≥ ${r.value}`)
+                          .join(', ')}
                       </div>
                     )}
                   </div>
@@ -296,11 +360,16 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
             <Panel title={`In Progress (${inProgress.length})`} accent="cyan">
               <div className="space-y-3">
                 {inProgress.map((inst) => (
-                  <div key={inst.id} className="border border-heliora-cyan/20 rounded p-3 bg-heliora-cyan/5 flex items-center justify-between">
+                  <div
+                    key={inst.id}
+                    className="border border-heliora-cyan/20 rounded p-3 bg-heliora-cyan/5 flex items-center justify-between"
+                  >
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <KindBadge kind={inst.definition.kind} />
-                        <span className="text-heliora-text font-mono text-sm">{inst.definition.title}</span>
+                        <span className="text-heliora-text font-mono text-sm">
+                          {inst.definition.title}
+                        </span>
                       </div>
                       <div className="text-heliora-text-dim text-xs">
                         {formatTimeLeft(inst.completesAt)}
@@ -324,13 +393,18 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
             <Panel title={`History (${completed.length})`} accent="green">
               <div className="space-y-2">
                 {completed.slice(0, 10).map((inst) => {
-                  const outcome = inst.outcome as OutcomeEntry | undefined
+                  const outcome = inst.outcome as OutcomeEntry | undefined;
                   return (
-                    <div key={inst.id} className={`border rounded p-3 ${inst.status === 'COMPLETED' ? 'border-heliora-green/20 bg-heliora-green/5' : 'border-heliora-red/20 bg-heliora-red/5'}`}>
+                    <div
+                      key={inst.id}
+                      className={`border rounded p-3 ${inst.status === 'COMPLETED' ? 'border-heliora-green/20 bg-heliora-green/5' : 'border-heliora-red/20 bg-heliora-red/5'}`}
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <StatusBadge status={inst.status} />
-                          <span className="text-heliora-text text-sm font-mono">{inst.definition.title}</span>
+                          <span className="text-heliora-text text-sm font-mono">
+                            {inst.definition.title}
+                          </span>
                         </div>
                         <div className="text-heliora-text-dim text-xs">
                           {inst.completedAt && formatTimeAgo(inst.completedAt)}
@@ -339,13 +413,20 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
                       {outcome && (
                         <div className="mt-1 text-xs text-heliora-text-dim">
                           Roll: {outcome.roll} / {outcome.successChance} chance
-                          {outcome.appliedRewards?.map((r) => (
-                            r.type === 'CREDITS' ? <span key={`${r.type}-${r.value}`} className="ml-2 text-heliora-green">+${r.value}</span> : null
-                          ))}
+                          {outcome.appliedRewards?.map((r) =>
+                            r.type === 'CREDITS' ? (
+                              <span
+                                key={`${r.type}-${r.value}`}
+                                className="ml-2 text-heliora-green"
+                              >
+                                +${r.value}
+                              </span>
+                            ) : null,
+                          )}
                         </div>
                       )}
                     </div>
-                  )
+                  );
                 })}
               </div>
             </Panel>
@@ -356,11 +437,16 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
             <Panel title="Activity Log" accent="yellow">
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {activity.slice(0, 20).map((log) => (
-                  <div key={log.id} className="flex items-start gap-3 text-sm border-b border-heliora-border/30 pb-2 last:border-0">
+                  <div
+                    key={log.id}
+                    className="flex items-start gap-3 text-sm border-b border-heliora-border/30 pb-2 last:border-0"
+                  >
                     <span className="text-base shrink-0">{ACTIVITY_ICONS[log.type] || '•'}</span>
                     <div className="flex-1 min-w-0">
                       <p className="text-heliora-text text-xs">{log.message}</p>
-                      <p className="text-heliora-text-dim text-xs">{formatTimeAgo(log.createdAt)}</p>
+                      <p className="text-heliora-text-dim text-xs">
+                        {formatTimeAgo(log.createdAt)}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -370,5 +456,5 @@ export function OpportunitiesPanel({ allOpportunities }: OpportunitiesPanelProps
         </>
       )}
     </div>
-  )
+  );
 }

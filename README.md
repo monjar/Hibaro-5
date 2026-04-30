@@ -31,10 +31,12 @@ hibaro-5/
 │   │   └── src/
 │   │       ├── modules/   # Feature modules (players, characters, etc.)
 │   │       └── prisma/    # Prisma service
+│   ├── admin/             # Next.js admin control plane
 │   └── worker/            # BullMQ background worker
 ├── packages/
 │   ├── game-rules/        # Pure game logic (no NestJS dependencies)
 │   ├── game-types/        # Shared TypeScript types
+│   ├── platform-sdk/      # Shared API client + realtime contracts
 │   └── validation/        # Zod schemas
 ├── prisma/
 │   ├── schema.prisma      # Database schema
@@ -74,7 +76,15 @@ npm run db:seed
 # 6. Start the API
 npm run dev
 
+# 7. Start the player web app
+npm run dev:web
+
+# 8. Start the admin control plane
+npm run dev:admin
+
 # API is now running at http://localhost:3000
+# Player web app at http://localhost:3001
+# Admin control plane at http://localhost:3002
 # Swagger docs at http://localhost:3000/api/docs
 ```
 
@@ -198,6 +208,8 @@ POST /opportunities/instances/:instanceId/resolve  # Manually resolve (dev)
 ```
 POST /simulation/tick          # Resolve all due opportunities + world events
 GET  /simulation/world-state   # Snapshot of planets/factions/corps/events
+GET  /simulation/history       # Recent step-based simulation tick history
+GET  /simulation/realtime-contracts  # Shared realtime event contracts
 ```
 
 ### World Events
