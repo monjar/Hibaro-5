@@ -1,45 +1,20 @@
 import 'dotenv/config';
 import { Worker, Queue } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
+import { calculateOpportunitySuccessChance } from '@heliora/game-rules';
 
 const prisma = new PrismaClient();
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const parsedUrl = new URL(REDIS_URL);
 const redisConnection = {
-  host: REDIS_URL.replace('redis://', '').split(':')[0] || 'localhost',
-  port: parseInt(REDIS_URL.split(':').pop() || '6379'),
+  host: parsedUrl.hostname || 'localhost',
+  port: parseInt(parsedUrl.port || '6379'),
 };
 
 export const opportunityQueue = new Queue('opportunity-resolution', {
   connection: redisConnection,
 });
-
-function calculateSuccessChance(character: any, definition: any): number {
-  let chance = 0.7;
-  chance -= (definition.difficulty || 1) * 0.08;
-
-  const statBonus = (total: number) => total * 0.005;
-  switch (definition.type) {
-    case 'HACKING':
-      chance += statBonus((character.hacking || 0) + (character.intelligence || 0));
-      break;
-    case 'SMUGGLING':
-      chance += statBonus((character.stealth || 0) + (character.charisma || 0));
-      break;
-    case 'BOUNTY':
-    case 'ASSASSINATION':
-      chance += statBonus((character.combat || 0) + (character.agility || 0));
-      break;
-    case 'REPAIR':
-      chance += statBonus((character.engineering || 0) + (character.intelligence || 0));
-      break;
-    case 'DELIVERY':
-      chance += statBonus(character.agility || 0);
-      break;
-  }
-
-  return Math.min(0.95, Math.max(0.05, chance));
-}
 
 async function resolveOpportunityInstance(instanceId: string) {
   const instance = await prisma.opportunityInstance.findUnique({
@@ -58,7 +33,7 @@ async function resolveOpportunityInstance(instanceId: string) {
   }
 
   const { definition, character } = instance;
-  const successChance = calculateSuccessChance(character, definition);
+  const successChance = calculateOpportunitySuccessChance(character, definition);
   const roll = Math.random();
   const success = roll <= successChance;
 
@@ -75,7 +50,7 @@ async function resolveOpportunityInstance(instanceId: string) {
         appliedRewards.push(reward);
       } else if (reward.type === 'STAT_XP') {
         if (Math.random() < 0.5 && reward.key) {
-          characterUpdates[reward.key] = (character[reward.key as keyof typeof character] as number || 0) + 1;
+          characterUpdates[reward.key] = ((character[reward.key as keyof typeof character] || 0) as number) + 1;
         }
         appliedRewards.push(reward);
       }

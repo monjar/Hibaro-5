@@ -606,7 +606,7 @@ async function main() {
       rarity: 'UNCOMMON',
       baseValue: 0,
       weight: 0.05,
-      requirements: [{ type: 'CORPORATION_REPUTATION_MIN', id: 'pigeon-corp', value: 5 }],
+      requirements: [{ type: 'CORPORATION_REPUTATION_MIN', id: pigeonCorp.id, value: 5 }],
     },
   });
 
