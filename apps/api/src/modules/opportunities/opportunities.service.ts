@@ -295,7 +295,7 @@ export class OpportunitiesService {
       case 'QUEST':
         return 'QUEST_STARTED';
       case 'JOB':
-        return 'GIG_ACCEPTED';
+        return 'JOB_ACCEPTED';
       default:
         return 'GIG_ACCEPTED';
     }
