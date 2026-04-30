@@ -12,7 +12,7 @@ import { RegisterDto } from './dto/register.dto';
 
 const PASSWORD_HASH_KEY_LENGTH = 32;
 const PASSWORD_HASH_OPTIONS = {
-  N: 16384,
+  N: 32768,
   r: 8,
   p: 1,
 } as const;
