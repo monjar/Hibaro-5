@@ -11,6 +11,7 @@ import { OpportunitiesModule } from './modules/opportunities/opportunities.modul
 import { SimulationModule } from './modules/simulation/simulation.module';
 import { WorldEventsModule } from './modules/world-events/world-events.module';
 import { HealthModule } from './modules/health/health.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { HealthModule } from './modules/health/health.module';
     SimulationModule,
     WorldEventsModule,
     HealthModule,
+    AuthModule,
   ],
 })
 export class AppModule {}

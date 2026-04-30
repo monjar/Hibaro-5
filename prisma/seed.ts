@@ -1,6 +1,14 @@
+import { randomBytes, scryptSync } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+const TEST_PLAYER_PASSWORD = 'changeme123';
+
+function hashPassword(password: string) {
+  const salt = randomBytes(16).toString('hex');
+  const hash = scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
 
 async function main() {
   console.log('🌌 Seeding Heliora / Hibaro-5...');
@@ -668,10 +676,14 @@ async function main() {
   // ==================== SEED PLAYER & CHARACTER ====================
   const testPlayer = await prisma.player.upsert({
     where: { username: 'test_player' },
-    update: {},
+    update: {
+      email: 'test@heliora.game',
+      passwordHash: hashPassword(TEST_PLAYER_PASSWORD),
+    },
     create: {
       username: 'test_player',
       email: 'test@heliora.game',
+      passwordHash: hashPassword(TEST_PLAYER_PASSWORD),
     },
   });
 
@@ -747,7 +759,9 @@ async function main() {
     },
   });
 
-  console.log(`✅ Test player: test_player | Character: Nova Rook (id: ${novaRook.id})`);
+  console.log(
+    `✅ Test player: test_player | Password: ${TEST_PLAYER_PASSWORD} | Character: Nova Rook (id: ${novaRook.id})`,
+  );
 
   // ==================== OPPORTUNITY DEFINITIONS ====================
 
