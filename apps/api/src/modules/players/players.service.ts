@@ -13,7 +13,7 @@ export class PlayersService {
 
     const player = await this.prisma.player.findFirst({
       where: {
-        OR: [{ id: currentPlayer.sub }, { username: currentPlayer.username }],
+        OR: [{ id: identifier }, { username: identifier }],
       },
       include: { character: true },
     });
