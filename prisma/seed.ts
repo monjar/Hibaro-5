@@ -1,6 +1,8 @@
 import { PrismaClient } from '@prisma/client';
+import { hashPasswordSync } from './password-hash';
 
 const prisma = new PrismaClient();
+const TEST_PLAYER_PASSWORD = process.env.SEED_TEST_PLAYER_PASSWORD ?? 'changeme123';
 
 async function main() {
   console.log('🌌 Seeding Heliora / Hibaro-5...');
@@ -668,10 +670,14 @@ async function main() {
   // ==================== SEED PLAYER & CHARACTER ====================
   const testPlayer = await prisma.player.upsert({
     where: { username: 'test_player' },
-    update: {},
+    update: {
+      email: 'test@heliora.game',
+      passwordHash: hashPasswordSync(TEST_PLAYER_PASSWORD),
+    },
     create: {
       username: 'test_player',
       email: 'test@heliora.game',
+      passwordHash: hashPasswordSync(TEST_PLAYER_PASSWORD),
     },
   });
 

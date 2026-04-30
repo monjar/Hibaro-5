@@ -1,4 +1,10 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ActivityType } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const STAT_XP_GAIN_PROBABILITY = 0.5;
@@ -12,15 +18,18 @@ export class OpportunitiesService {
     return this.prisma.opportunityDefinition.findMany({ orderBy: { createdAt: 'desc' } });
   }
 
-  async findAvailableForCharacter(characterId: string) {
+  async findAvailableForCharacter(characterId: string, playerId: string) {
     const character = await this.prisma.character.findUnique({ where: { id: characterId } });
     if (!character) throw new NotFoundException(`Character ${characterId} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only access opportunities for your own character');
+    }
 
     const now = new Date();
     const all = await this.prisma.opportunityDefinition.findMany({
       where: {
-        OR: [{ startsAvailableAt: null }, { startsAvailableAt: { lte: now } }],
         AND: [
+          { OR: [{ startsAvailableAt: null }, { startsAvailableAt: { lte: now } }] },
           { OR: [{ endsAvailableAt: null }, { endsAvailableAt: { gte: now } }] },
         ],
       },
@@ -41,7 +50,13 @@ export class OpportunitiesService {
     });
   }
 
-  async findInstancesForCharacter(characterId: string) {
+  async findInstancesForCharacter(characterId: string, playerId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id: characterId } });
+    if (!character) throw new NotFoundException(`Character ${characterId} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only access opportunities for your own character');
+    }
+
     return this.prisma.opportunityInstance.findMany({
       where: { characterId },
       include: { definition: true },
@@ -49,7 +64,7 @@ export class OpportunitiesService {
     });
   }
 
-  async acceptOpportunity(opportunityId: string, characterId: string) {
+  async acceptOpportunity(opportunityId: string, characterId: string, playerId: string) {
     const [definition, character] = await Promise.all([
       this.prisma.opportunityDefinition.findUnique({ where: { id: opportunityId } }),
       this.prisma.character.findUnique({ where: { id: characterId } }),
@@ -57,10 +72,17 @@ export class OpportunitiesService {
 
     if (!definition) throw new NotFoundException(`Opportunity ${opportunityId} not found`);
     if (!character) throw new NotFoundException(`Character ${characterId} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only accept opportunities for your own character');
+    }
 
     // Check if already in progress
     const existing = await this.prisma.opportunityInstance.findFirst({
-      where: { definitionId: opportunityId, characterId, status: { in: ['IN_PROGRESS', 'ACCEPTED'] } },
+      where: {
+        definitionId: opportunityId,
+        characterId,
+        status: { in: ['IN_PROGRESS', 'ACCEPTED'] },
+      },
     });
     if (existing) throw new BadRequestException('Opportunity already in progress');
 
@@ -117,12 +139,15 @@ export class OpportunitiesService {
     return instance;
   }
 
-  async resolveInstance(instanceId: string) {
+  async resolveInstance(instanceId: string, playerId: string) {
     const instance = await this.prisma.opportunityInstance.findUnique({
       where: { id: instanceId },
       include: { definition: true, character: true },
     });
     if (!instance) throw new NotFoundException(`Instance ${instanceId} not found`);
+    if (instance.character.playerId !== playerId) {
+      throw new ForbiddenException('You can only resolve your own opportunity instances');
+    }
     if (instance.status === 'COMPLETED' || instance.status === 'FAILED') {
       throw new BadRequestException(`Instance already ${instance.status}`);
     }
@@ -160,10 +185,24 @@ export class OpportunitiesService {
           appliedRewards.push(reward);
         } else if (reward.type === 'FACTION_REPUTATION') {
           // Update relationship
-          await this.upsertRelationship('CHARACTER', character.id, 'FACTION', reward.factionId, 'REPUTATION', reward.value);
+          await this.upsertRelationship(
+            'CHARACTER',
+            character.id,
+            'FACTION',
+            reward.factionId,
+            'REPUTATION',
+            reward.value,
+          );
           appliedRewards.push(reward);
         } else if (reward.type === 'CORPORATION_REPUTATION') {
-          await this.upsertRelationship('CHARACTER', character.id, 'CORPORATION', reward.corporationId, 'REPUTATION', reward.value);
+          await this.upsertRelationship(
+            'CHARACTER',
+            character.id,
+            'CORPORATION',
+            reward.corporationId,
+            'REPUTATION',
+            reward.value,
+          );
           appliedRewards.push(reward);
         }
       }
@@ -175,7 +214,10 @@ export class OpportunitiesService {
           const consequences = risk.consequences || [];
           for (const consequence of consequences) {
             if (consequence.type === 'MODIFY_WANTED_LEVEL') {
-              characterUpdates.wantedLevel = Math.max(0, (character.wantedLevel || 0) + consequence.value);
+              characterUpdates.wantedLevel = Math.max(
+                0,
+                (character.wantedLevel || 0) + consequence.value,
+              );
               appliedRisks.push(consequence);
             } else if (consequence.type === 'MODIFY_STAT' && consequence.key === 'health') {
               characterUpdates.health = Math.max(0, (character.health || 100) + consequence.value);
@@ -213,7 +255,7 @@ export class OpportunitiesService {
 
     // Log activity
     if (character.playerId) {
-      const activityType = success
+      const activityType: ActivityType = success
         ? this.resolveActivityType(definition.kind)
         : 'GIG_FAILED';
       await this.prisma.activityLog.create({
@@ -232,19 +274,25 @@ export class OpportunitiesService {
     return updatedInstance;
   }
 
-  private acceptActivityType(kind: string): string {
+  private acceptActivityType(kind: string): ActivityType {
     switch (kind) {
-      case 'QUEST': return 'QUEST_STARTED';
-      case 'JOB': return 'JOB_ACCEPTED';
-      default: return 'GIG_ACCEPTED';
+      case 'QUEST':
+        return 'QUEST_STARTED';
+      case 'JOB':
+        return 'JOB_ACCEPTED';
+      default:
+        return 'GIG_ACCEPTED';
     }
   }
 
-  private resolveActivityType(kind: string): string {
+  private resolveActivityType(kind: string): ActivityType {
     switch (kind) {
-      case 'QUEST': return 'QUEST_COMPLETED';
-      case 'JOB': return 'JOB_COMPLETED';
-      default: return 'GIG_COMPLETED';
+      case 'QUEST':
+        return 'QUEST_COMPLETED';
+      case 'JOB':
+        return 'JOB_COMPLETED';
+      default:
+        return 'GIG_COMPLETED';
     }
   }
 

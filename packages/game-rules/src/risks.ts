@@ -43,10 +43,7 @@ export function applyRisk(
   }
 }
 
-export function applyRisks(
-  character: CharacterStats,
-  risks: Risk[],
-): RiskApplicationResult {
+export function applyRisks(character: CharacterStats, risks: Risk[]): RiskApplicationResult {
   const result: RiskApplicationResult = {
     wantedLevelDelta: 0,
     healthDelta: 0,
