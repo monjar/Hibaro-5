@@ -24,9 +24,16 @@ export const RequirementSchema = z.discriminatedUnion('type', [
 
 export const RewardSchema = z.object({
   type: z.enum([
-    'CREDITS', 'ITEM', 'FACTION_REPUTATION', 'CORPORATION_REPUTATION',
-    'CHARACTER_RELATIONSHIP', 'UNLOCK_BUILDING', 'UNLOCK_QUEST',
-    'STOCK_SHARES', 'RANK_UP', 'STAT_XP',
+    'CREDITS',
+    'ITEM',
+    'FACTION_REPUTATION',
+    'CORPORATION_REPUTATION',
+    'CHARACTER_RELATIONSHIP',
+    'UNLOCK_BUILDING',
+    'UNLOCK_QUEST',
+    'STOCK_SHARES',
+    'RANK_UP',
+    'STAT_XP',
   ]),
   value: z.number().optional(),
   key: z.string().optional(),

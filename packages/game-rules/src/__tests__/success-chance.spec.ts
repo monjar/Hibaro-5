@@ -21,7 +21,10 @@ const baseCharacter: CharacterStats = {
   reputation: 0,
 };
 
-const makeOpportunity = (type: OpportunityDefinition['type'], difficulty = 1): OpportunityDefinition => ({
+const makeOpportunity = (
+  type: OpportunityDefinition['type'],
+  difficulty = 1,
+): OpportunityDefinition => ({
   id: 'opp-1',
   title: 'Test Opportunity',
   kind: 'GIG',
@@ -40,8 +43,14 @@ describe('calculateOpportunitySuccessChance', () => {
   });
 
   it('is lower for harder opportunities', () => {
-    const easyChance = calculateOpportunitySuccessChance(baseCharacter, makeOpportunity('DELIVERY', 1));
-    const hardChance = calculateOpportunitySuccessChance(baseCharacter, makeOpportunity('DELIVERY', 5));
+    const easyChance = calculateOpportunitySuccessChance(
+      baseCharacter,
+      makeOpportunity('DELIVERY', 1),
+    );
+    const hardChance = calculateOpportunitySuccessChance(
+      baseCharacter,
+      makeOpportunity('DELIVERY', 5),
+    );
     expect(easyChance).toBeGreaterThan(hardChance);
   });
 
@@ -62,7 +71,17 @@ describe('calculateOpportunitySuccessChance', () => {
   });
 
   it('clamps minimum success chance at 0.05 even with max difficulty', () => {
-    const lowChar = { ...baseCharacter, hacking: 1, intelligence: 1, stealth: 1, combat: 1, agility: 1, strength: 1, engineering: 1, charisma: 1 };
+    const lowChar = {
+      ...baseCharacter,
+      hacking: 1,
+      intelligence: 1,
+      stealth: 1,
+      combat: 1,
+      agility: 1,
+      strength: 1,
+      engineering: 1,
+      charisma: 1,
+    };
     const chance = calculateOpportunitySuccessChance(lowChar, makeOpportunity('HACKING', 10));
     expect(chance).toBeGreaterThanOrEqual(0.05);
   });

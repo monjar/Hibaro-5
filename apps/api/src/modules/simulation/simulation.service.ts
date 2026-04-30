@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma, RelationshipType } from '@prisma/client';
+import { REALTIME_EVENT_CONTRACTS } from '@heliora/platform-sdk';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
+import { clampWorldMetric, deriveCorporationStatus } from './simulation.utils';
 
 @Injectable()
 export class SimulationService {
@@ -12,7 +15,223 @@ export class SimulationService {
   async tick() {
     const now = new Date();
 
-    // Find all due opportunity instances
+    const opportunityResults = await this.resolveDueOpportunities(now);
+    const worldEvents = await this.syncWorldEvents(now);
+    const economy = await this.advanceEconomy();
+    const corporations = await this.advanceCorporations();
+    const districtControl = await this.buildDistrictControlState();
+    const npcActivity = await this.processNpcActivity(now);
+
+    const stepSummaries = [
+      {
+        step: 'opportunity_resolution' as const,
+        processed: opportunityResults.length,
+        changes: opportunityResults.length,
+        notes: opportunityResults.length
+          ? ['Resolved due opportunity instances']
+          : ['No due opportunities'],
+      },
+      {
+        step: 'world_events' as const,
+        processed: worldEvents.activated + worldEvents.resolved,
+        changes: worldEvents.activated + worldEvents.resolved,
+        notes: [`${worldEvents.activated} activated`, `${worldEvents.resolved} resolved`],
+      },
+      {
+        step: 'economy' as const,
+        processed: economy.processed,
+        changes: economy.updated,
+        notes: economy.notes,
+      },
+      {
+        step: 'corporations' as const,
+        processed: corporations.processed,
+        changes: corporations.updated,
+        notes: corporations.notes,
+      },
+      {
+        step: 'district_control' as const,
+        processed: districtControl.length,
+        changes: districtControl.filter((district) => district.controlScore !== 50).length,
+        notes: ['Computed district travel surcharges and control scores'],
+      },
+      {
+        step: 'npc_activity' as const,
+        processed: npcActivity.actions.length,
+        changes: npcActivity.actions.length,
+        notes: npcActivity.actions.length
+          ? ['Logged notable NPC actions']
+          : ['No NPC actors available'],
+      },
+    ];
+
+    const results: Record<string, unknown>[] = [
+      ...opportunityResults,
+      { type: 'world-events', activated: worldEvents.activated, resolved: worldEvents.resolved },
+      { type: 'economy', updates: economy.updated },
+      { type: 'corporations', updates: corporations.updated },
+      ...npcActivity.actions,
+    ];
+
+    const summary = {
+      processedAt: now.toISOString(),
+      totals: {
+        opportunitiesResolved: opportunityResults.length,
+        worldEventsActivated: worldEvents.activated,
+        worldEventsResolved: worldEvents.resolved,
+        marketUpdates: economy.updated,
+        corporationUpdates: corporations.updated,
+        districtControlUpdates: districtControl.length,
+        npcActions: npcActivity.actions.length,
+      },
+      stepSummaries,
+    };
+
+    const storedTick = await this.prisma.simulationTick.create({
+      data: {
+        processedAt: now,
+        summary: summary as Prisma.JsonObject,
+        results: results as Prisma.JsonArray,
+      },
+    });
+
+    return {
+      id: storedTick.id,
+      ...summary,
+      results,
+    };
+  }
+
+  async getHistory(limit = 10) {
+    const ticks = await this.prisma.simulationTick.findMany({
+      orderBy: { processedAt: 'desc' },
+      take: Math.min(Math.max(limit, 1), 50),
+    });
+
+    return ticks.map((tick) => ({
+      id: tick.id,
+      ...(tick.summary as Record<string, unknown>),
+      results: (tick.results as Record<string, unknown>[] | null) ?? [],
+    }));
+  }
+
+  getRealtimeContracts() {
+    return REALTIME_EVENT_CONTRACTS;
+  }
+
+  async getWorldState() {
+    const [planets, factions, corporations, activeEvents, districts, npcLogs, recentTicks] =
+      await Promise.all([
+        this.prisma.planet.findMany({
+          include: { solarSystem: true },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.faction.findMany({ orderBy: { influence: 'desc' } }),
+        this.prisma.corporation.findMany({ orderBy: { name: 'asc' } }),
+        this.prisma.worldEvent.findMany({
+          where: { status: 'ACTIVE' },
+          orderBy: { startsAt: 'desc' },
+        }),
+        this.prisma.district.findMany({
+          include: { planet: true, controllingFaction: true },
+          orderBy: [{ planet: { name: 'asc' } }, { name: 'asc' }],
+        }),
+        this.prisma.activityLog.findMany({
+          where: { playerId: null, characterId: { not: null } },
+          orderBy: { createdAt: 'desc' },
+          take: 12,
+          include: { character: true },
+        }),
+        this.prisma.simulationTick.findMany({ orderBy: { processedAt: 'desc' }, take: 8 }),
+      ]);
+
+    const districtControl = districts.map((district) => ({
+      districtId: district.id,
+      districtName: district.name,
+      planetId: district.planetId,
+      planetName: district.planet.name,
+      controllingFactionId: district.controllingFactionId,
+      controllingFactionName: district.controllingFaction?.name ?? null,
+      controlScore: clampWorldMetric(
+        50 +
+          Math.round((district.controllingFaction?.influence ?? 0) / 12) +
+          district.lawLevel * 2 -
+          district.dangerLevel * 3,
+        5,
+        95,
+      ),
+      travelSurcharge: Math.max(0, district.dangerLevel * 2 + Math.max(0, 4 - district.lawLevel)),
+      dangerLevel: district.dangerLevel,
+      lawLevel: district.lawLevel,
+      economyLevel: district.economyLevel,
+    }));
+
+    return {
+      timestamp: new Date().toISOString(),
+      planets,
+      factions,
+      corporations,
+      activeWorldEvents: activeEvents,
+      marketState: {
+        planetaryMarkets: planets.map((planet) => ({
+          planetId: planet.id,
+          planetName: planet.name,
+          economyLevel: planet.economyLevel,
+          demandIndex: clampWorldMetric(
+            planet.economyLevel + planet.lawLevel - planet.dangerLevel,
+            1,
+            15,
+          ),
+          riskIndex: clampWorldMetric(planet.dangerLevel + Math.max(0, 5 - planet.lawLevel), 1, 15),
+          travelPressure: clampWorldMetric(
+            planet.dangerLevel * 2 + Math.max(0, 5 - planet.lawLevel),
+            1,
+            20,
+          ),
+        })),
+        corporations: corporations.map((corporation) => ({
+          corporationId: corporation.id,
+          corporationName: corporation.name,
+          industry: corporation.industry,
+          status: corporation.status,
+          stockTicker: corporation.stockTicker,
+          stockPrice: corporation.stockPrice,
+          stockVolatility: corporation.stockVolatility,
+          revenue: corporation.revenue,
+          debt: corporation.debt,
+          cash: corporation.cash,
+          riskOfBankruptcy: corporation.riskOfBankruptcy,
+          marketMomentum: Number((corporation.revenue - corporation.debt * 0.2).toFixed(2)),
+        })),
+        totalCorporateCash: corporations.reduce((sum, corporation) => sum + corporation.cash, 0),
+        totalCorporateDebt: corporations.reduce((sum, corporation) => sum + corporation.debt, 0),
+      },
+      districtControl,
+      recentNpcActivity: npcLogs.map((log) => {
+        const related = (log.relatedEntities as Record<string, unknown> | null) ?? {};
+        return {
+          characterId: log.characterId ?? 'unknown',
+          characterName: log.character?.name ?? 'Unknown NPC',
+          action: log.type,
+          targetType: typeof related.targetType === 'string' ? related.targetType : undefined,
+          targetId: typeof related.targetId === 'string' ? related.targetId : undefined,
+          targetName: typeof related.targetName === 'string' ? related.targetName : undefined,
+          creditsDelta: typeof related.creditsDelta === 'number' ? related.creditsDelta : 0,
+          influenceDelta: typeof related.influenceDelta === 'number' ? related.influenceDelta : 0,
+          summary: log.message,
+          createdAt: log.createdAt.toISOString(),
+        };
+      }),
+      recentTicks: recentTicks.map((tick) => ({
+        id: tick.id,
+        ...(tick.summary as Record<string, unknown>),
+        results: (tick.results as Record<string, unknown>[] | null) ?? [],
+      })),
+      realtimeContracts: REALTIME_EVENT_CONTRACTS,
+    };
+  }
+
+  private async resolveDueOpportunities(now: Date) {
     const dueInstances = await this.prisma.opportunityInstance.findMany({
       where: {
         status: 'IN_PROGRESS',
@@ -21,67 +240,371 @@ export class SimulationService {
       include: { definition: true, character: true },
     });
 
-    const results = [];
+    const results: Record<string, unknown>[] = [];
     for (const instance of dueInstances) {
       try {
         const result = await this.opportunitiesService.resolveInstanceInternal(instance);
-        results.push({ instanceId: instance.id, status: result.status, outcome: result.outcome });
-      } catch (err) {
-        results.push({ instanceId: instance.id, error: (err as Error).message });
+        results.push({
+          type: 'opportunity',
+          instanceId: instance.id,
+          status: result.status,
+          outcome: result.outcome,
+        });
+      } catch (error) {
+        results.push({
+          type: 'opportunity',
+          instanceId: instance.id,
+          error: (error as Error).message,
+        });
       }
     }
 
-    // Activate scheduled world events
-    const scheduledEvents = await this.prisma.worldEvent.findMany({
-      where: {
-        status: 'SCHEDULED',
-        startsAt: { lte: now },
-      },
-    });
-    for (const event of scheduledEvents) {
-      await this.prisma.worldEvent.update({
-        where: { id: event.id },
-        data: { status: 'ACTIVE' },
-      });
-    }
+    return results;
+  }
 
-    // Resolve ended world events
-    const activeEvents = await this.prisma.worldEvent.findMany({
-      where: {
-        status: 'ACTIVE',
-        endsAt: { lte: now },
-      },
-    });
-    for (const event of activeEvents) {
-      await this.prisma.worldEvent.update({
-        where: { id: event.id },
-        data: { status: 'RESOLVED' },
-      });
+  private async syncWorldEvents(now: Date) {
+    const [scheduledEvents, expiringEvents] = await Promise.all([
+      this.prisma.worldEvent.findMany({
+        where: {
+          status: 'SCHEDULED',
+          startsAt: { lte: now },
+        },
+      }),
+      this.prisma.worldEvent.findMany({
+        where: {
+          status: 'ACTIVE',
+          endsAt: { lte: now },
+        },
+      }),
+    ]);
+
+    await Promise.all([
+      ...scheduledEvents.map((event) =>
+        this.prisma.worldEvent.update({ where: { id: event.id }, data: { status: 'ACTIVE' } }),
+      ),
+      ...expiringEvents.map((event) =>
+        this.prisma.worldEvent.update({ where: { id: event.id }, data: { status: 'RESOLVED' } }),
+      ),
+    ]);
+
+    return { activated: scheduledEvents.length, resolved: expiringEvents.length };
+  }
+
+  private async advanceEconomy() {
+    const planets = await this.prisma.planet.findMany({ include: { districts: true } });
+    const activeEvents = await this.prisma.worldEvent.findMany({ where: { status: 'ACTIVE' } });
+
+    let updated = 0;
+    for (const planet of planets) {
+      const avgDistrictEconomy = planet.districts.length
+        ? planet.districts.reduce((sum, district) => sum + district.economyLevel, 0) /
+          planet.districts.length
+        : planet.economyLevel;
+      const eventPressure = activeEvents.filter(
+        (event) =>
+          event.scope === 'WORLD' ||
+          event.scope === 'PLANET' ||
+          JSON.stringify(event.affectedEntities).includes(planet.id),
+      ).length;
+      const nextEconomyLevel = clampWorldMetric(
+        Math.round(
+          (planet.economyLevel +
+            avgDistrictEconomy +
+            planet.lawLevel -
+            planet.dangerLevel -
+            eventPressure) /
+            2,
+        ),
+        1,
+        10,
+      );
+
+      if (nextEconomyLevel !== planet.economyLevel) {
+        updated += 1;
+        await this.prisma.planet.update({
+          where: { id: planet.id },
+          data: { economyLevel: nextEconomyLevel },
+        });
+      }
     }
 
     return {
-      processedAt: now.toISOString(),
-      opportunitiesResolved: results.length,
-      worldEventsActivated: scheduledEvents.length,
-      worldEventsResolved: activeEvents.length,
-      results,
+      processed: planets.length,
+      updated,
+      notes: ['Updated planetary economy indexes from districts and active events'],
     };
   }
 
-  async getWorldState() {
-    const [planets, factions, corporations, activeEvents] = await Promise.all([
-      this.prisma.planet.findMany({ include: { solarSystem: true } }),
-      this.prisma.faction.findMany(),
+  private async advanceCorporations() {
+    const [corporations, planets, employments, activeEvents] = await Promise.all([
       this.prisma.corporation.findMany(),
+      this.prisma.planet.findMany(),
+      this.prisma.corporationEmployment.findMany(),
       this.prisma.worldEvent.findMany({ where: { status: 'ACTIVE' } }),
     ]);
 
+    const employmentMap = new Map<string, number>();
+    for (const employment of employments) {
+      employmentMap.set(
+        employment.corporationId,
+        (employmentMap.get(employment.corporationId) ?? 0) + 1,
+      );
+    }
+
+    const planetEconomyIndex = planets.length
+      ? planets.reduce((sum, planet) => sum + planet.economyLevel, 0) / planets.length
+      : 5;
+
+    let updated = 0;
+    for (const corporation of corporations) {
+      const activeEventPressure = activeEvents.filter(
+        (event) =>
+          event.scope === 'WORLD' ||
+          event.scope === 'CORPORATION' ||
+          JSON.stringify(event.affectedEntities).includes(corporation.id),
+      ).length;
+      const employmentCount = employmentMap.get(corporation.id) ?? 0;
+      const revenue = Number(
+        Math.max(
+          25,
+          corporation.revenue * 0.6 +
+            planetEconomyIndex * 22 +
+            employmentCount * 12 -
+            activeEventPressure * 15,
+        ).toFixed(2),
+      );
+      const debt = Number(
+        Math.max(
+          0,
+          corporation.debt * 0.88 + activeEventPressure * 28 - employmentCount * 6,
+        ).toFixed(2),
+      );
+      const cash = Number(Math.max(0, corporation.cash + revenue - debt * 0.12).toFixed(2));
+      const riskOfBankruptcy = Number(
+        clampWorldMetric(
+          debt / Math.max(1, cash + revenue) + activeEventPressure * 0.08,
+          0,
+          1,
+        ).toFixed(2),
+      );
+      const stockPrice = Number(
+        Math.max(
+          5,
+          (corporation.stockPrice ?? 40) +
+            planetEconomyIndex -
+            activeEventPressure * 1.5 +
+            employmentCount * 0.75 -
+            riskOfBankruptcy * 6,
+        ).toFixed(2),
+      );
+      const stockVolatility = Number(
+        clampWorldMetric(
+          0.12 + activeEventPressure * 0.08 + riskOfBankruptcy * 0.2,
+          0.05,
+          1,
+        ).toFixed(2),
+      );
+      const status = deriveCorporationStatus(riskOfBankruptcy, cash, debt);
+
+      updated += 1;
+      await this.prisma.corporation.update({
+        where: { id: corporation.id },
+        data: {
+          revenue,
+          debt,
+          cash,
+          riskOfBankruptcy,
+          stockPrice,
+          stockVolatility,
+          status,
+        },
+      });
+    }
+
     return {
-      timestamp: new Date().toISOString(),
-      planets,
-      factions,
-      corporations,
-      activeWorldEvents: activeEvents,
+      processed: corporations.length,
+      updated,
+      notes: ['Applied price movement rules and bankruptcy pressure'],
     };
+  }
+
+  private async buildDistrictControlState() {
+    const districts = await this.prisma.district.findMany({
+      include: { planet: true, controllingFaction: true },
+    });
+
+    return districts.map((district) => ({
+      districtId: district.id,
+      districtName: district.name,
+      planetId: district.planetId,
+      planetName: district.planet.name,
+      controllingFactionId: district.controllingFactionId,
+      controllingFactionName: district.controllingFaction?.name ?? null,
+      controlScore: clampWorldMetric(
+        50 +
+          Math.round((district.controllingFaction?.influence ?? 0) / 12) +
+          district.lawLevel * 2 -
+          district.dangerLevel * 3,
+        5,
+        95,
+      ),
+      travelSurcharge: Math.max(0, district.dangerLevel * 2 + Math.max(0, 4 - district.lawLevel)),
+      dangerLevel: district.dangerLevel,
+      lawLevel: district.lawLevel,
+      economyLevel: district.economyLevel,
+    }));
+  }
+
+  private async processNpcActivity(now: Date) {
+    const npcs = await this.prisma.character.findMany({
+      where: { type: 'NPC' },
+      include: {
+        factionMemberships: { include: { faction: true } },
+        corporationEmployments: { include: { corporation: true } },
+      },
+      orderBy: { name: 'asc' },
+      take: 6,
+    });
+
+    const actions: Record<string, unknown>[] = [];
+
+    for (const npc of npcs) {
+      const corporationEmployment = npc.corporationEmployments[0];
+      const factionMembership = npc.factionMemberships[0];
+
+      if (corporationEmployment) {
+        const creditsDelta = clampWorldMetric(
+          Math.round((npc.engineering + npc.intelligence + npc.hacking) / 3),
+          2,
+          12,
+        );
+        await this.prisma.corporation.update({
+          where: { id: corporationEmployment.corporationId },
+          data: {
+            cash: { increment: creditsDelta },
+            revenue: { increment: creditsDelta * 1.5 },
+          },
+        });
+        await this.upsertRelationship(
+          npc.id,
+          'CORPORATION',
+          corporationEmployment.corporationId,
+          RelationshipType.LOYALTY,
+          1,
+        );
+        const summary = `${npc.name} reinforced ${corporationEmployment.corporation.name} logistics and generated ${creditsDelta} credits.`;
+        await this.prisma.activityLog.create({
+          data: {
+            characterId: npc.id,
+            type: 'JOB_COMPLETED',
+            message: summary,
+            relatedEntities: {
+              targetType: 'CORPORATION',
+              targetId: corporationEmployment.corporationId,
+              targetName: corporationEmployment.corporation.name,
+              creditsDelta,
+              influenceDelta: 0,
+            },
+          },
+        });
+        actions.push({
+          characterId: npc.id,
+          characterName: npc.name,
+          action: 'JOB_COMPLETED',
+          targetType: 'CORPORATION',
+          targetId: corporationEmployment.corporationId,
+          targetName: corporationEmployment.corporation.name,
+          creditsDelta,
+          influenceDelta: 0,
+          summary,
+          createdAt: now.toISOString(),
+        });
+        continue;
+      }
+
+      if (factionMembership) {
+        const influenceDelta = clampWorldMetric(Math.round((npc.charisma + npc.stealth) / 4), 1, 5);
+        await this.prisma.faction.update({
+          where: { id: factionMembership.factionId },
+          data: {
+            influence: { increment: influenceDelta },
+            treasury: { increment: influenceDelta * 4 },
+          },
+        });
+        await this.upsertRelationship(
+          npc.id,
+          'FACTION',
+          factionMembership.factionId,
+          RelationshipType.INFLUENCE,
+          influenceDelta,
+        );
+        const summary = `${npc.name} strengthened ${factionMembership.faction.name} presence by ${influenceDelta} influence.`;
+        await this.prisma.activityLog.create({
+          data: {
+            characterId: npc.id,
+            type: 'RELATIONSHIP_CHANGED',
+            message: summary,
+            relatedEntities: {
+              targetType: 'FACTION',
+              targetId: factionMembership.factionId,
+              targetName: factionMembership.faction.name,
+              creditsDelta: influenceDelta * 4,
+              influenceDelta,
+            },
+          },
+        });
+        actions.push({
+          characterId: npc.id,
+          characterName: npc.name,
+          action: 'RELATIONSHIP_CHANGED',
+          targetType: 'FACTION',
+          targetId: factionMembership.factionId,
+          targetName: factionMembership.faction.name,
+          creditsDelta: influenceDelta * 4,
+          influenceDelta,
+          summary,
+          createdAt: now.toISOString(),
+        });
+      }
+    }
+
+    return { actions };
+  }
+
+  private async upsertRelationship(
+    sourceId: string,
+    targetType: string,
+    targetId: string,
+    relationshipType: RelationshipType,
+    delta: number,
+  ) {
+    const existing = await this.prisma.relationship.findFirst({
+      where: {
+        sourceType: 'CHARACTER',
+        sourceId,
+        targetType,
+        targetId,
+        relationshipType,
+      },
+    });
+
+    if (existing) {
+      await this.prisma.relationship.update({
+        where: { id: existing.id },
+        data: { value: existing.value + delta },
+      });
+      return;
+    }
+
+    await this.prisma.relationship.create({
+      data: {
+        sourceType: 'CHARACTER',
+        sourceId,
+        targetType,
+        targetId,
+        relationshipType,
+        value: delta,
+      },
+    });
   }
 }

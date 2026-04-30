@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=apps/api",
+    "dev:admin": "npm run dev --workspace=apps/admin",
     "dev:web": "npm run dev --workspace=apps/web",
     "build": "npm run build --workspace=apps/api",
     "start": "npm run start --workspace=apps/api",
@@ -15,7 +16,7 @@
     "prisma:migrate": "npx prisma migrate dev --schema=prisma/schema.prisma",
     "prisma:generate": "npx prisma generate --schema=prisma/schema.prisma",
     "db:seed": "npx ts-node --project prisma/tsconfig.seed.json prisma/seed.ts",
-    "lint": "eslint \"{apps,packages}/**/*.ts\" --fix",
+    "lint": "eslint \"{apps,packages}/**/*.ts\" --fix --ignore-pattern \"**/next-env.d.ts\"",
     "format": "prettier --write \"{apps,packages,prisma}/**/*.ts\""
   },
   "overrides": {
