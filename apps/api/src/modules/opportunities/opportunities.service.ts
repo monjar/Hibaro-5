@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
+const STAT_XP_GAIN_PROBABILITY = 0.5;
+const DEFAULT_RISK_PROBABILITY = 0.3;
+
 @Injectable()
 export class OpportunitiesService {
   constructor(private prisma: PrismaService) {}
@@ -99,7 +102,7 @@ export class OpportunitiesService {
 
     // Log activity
     if (character.playerId) {
-      const activityType = definition.kind === 'GIG' ? 'GIG_ACCEPTED' : definition.kind === 'QUEST' ? 'QUEST_STARTED' : 'GIG_ACCEPTED';
+      const activityType = this.acceptActivityType(definition.kind);
       await this.prisma.activityLog.create({
         data: {
           playerId: character.playerId,
@@ -151,7 +154,7 @@ export class OpportunitiesService {
           appliedRewards.push(reward);
         } else if (reward.type === 'STAT_XP') {
           const currentVal = character[reward.key] || 0;
-          if (Math.random() < 0.5) {
+          if (Math.random() < STAT_XP_GAIN_PROBABILITY) {
             characterUpdates[reward.key] = currentVal + 1;
           }
           appliedRewards.push(reward);
@@ -168,7 +171,7 @@ export class OpportunitiesService {
       // Apply risks on failure
       for (const risk of risks) {
         const riskRoll = Math.random();
-        if (riskRoll < (risk.probability || 0.3)) {
+        if (riskRoll < (risk.probability ?? DEFAULT_RISK_PROBABILITY)) {
           const consequences = risk.consequences || [];
           for (const consequence of consequences) {
             if (consequence.type === 'MODIFY_WANTED_LEVEL') {
@@ -210,13 +213,9 @@ export class OpportunitiesService {
 
     // Log activity
     if (character.playerId) {
-      const kind = definition.kind;
-      let activityType: any;
-      if (success) {
-        activityType = kind === 'GIG' ? 'GIG_COMPLETED' : kind === 'QUEST' ? 'QUEST_COMPLETED' : 'JOB_COMPLETED';
-      } else {
-        activityType = 'GIG_FAILED';
-      }
+      const activityType = success
+        ? this.resolveActivityType(definition.kind)
+        : 'GIG_FAILED';
       await this.prisma.activityLog.create({
         data: {
           playerId: character.playerId,
@@ -231,6 +230,22 @@ export class OpportunitiesService {
     }
 
     return updatedInstance;
+  }
+
+  private acceptActivityType(kind: string): string {
+    switch (kind) {
+      case 'QUEST': return 'QUEST_STARTED';
+      case 'JOB': return 'JOB_ACCEPTED';
+      default: return 'GIG_ACCEPTED';
+    }
+  }
+
+  private resolveActivityType(kind: string): string {
+    switch (kind) {
+      case 'QUEST': return 'QUEST_COMPLETED';
+      case 'JOB': return 'JOB_COMPLETED';
+      default: return 'GIG_COMPLETED';
+    }
   }
 
   private calculateSuccessChance(character: any, definition: any): number {
