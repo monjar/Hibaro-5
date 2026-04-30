@@ -1,22 +1,8 @@
-import { randomBytes, scryptSync } from 'crypto';
 import { PrismaClient } from '@prisma/client';
+import { hashPasswordSync } from './password-hash';
 
 const prisma = new PrismaClient();
 const TEST_PLAYER_PASSWORD = process.env.SEED_TEST_PLAYER_PASSWORD ?? 'changeme123';
-const PASSWORD_HASH_KEY_LENGTH = 32;
-const PASSWORD_HASH_OPTIONS = {
-  N: 32768,
-  r: 8,
-  p: 1,
-} as const;
-
-function hashPassword(password: string) {
-  const salt = randomBytes(16).toString('hex');
-  const hash = scryptSync(password, salt, PASSWORD_HASH_KEY_LENGTH, PASSWORD_HASH_OPTIONS).toString(
-    'hex',
-  );
-  return `${salt}:${hash}`;
-}
 
 async function main() {
   console.log('🌌 Seeding Heliora / Hibaro-5...');
@@ -686,12 +672,12 @@ async function main() {
     where: { username: 'test_player' },
     update: {
       email: 'test@heliora.game',
-      passwordHash: hashPassword(TEST_PLAYER_PASSWORD),
+      passwordHash: hashPasswordSync(TEST_PLAYER_PASSWORD),
     },
     create: {
       username: 'test_player',
       email: 'test@heliora.game',
-      passwordHash: hashPassword(TEST_PLAYER_PASSWORD),
+      passwordHash: hashPasswordSync(TEST_PLAYER_PASSWORD),
     },
   });
 

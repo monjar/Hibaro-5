@@ -5,17 +5,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { hashPassword, verifyPassword } from '../../../../../prisma/password-hash';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-
-const PASSWORD_HASH_KEY_LENGTH = 32;
-const PASSWORD_HASH_OPTIONS = {
-  N: 32768,
-  r: 8,
-  p: 1,
-} as const;
 
 export interface AuthenticatedPlayer {
   sub: string;
@@ -110,7 +103,7 @@ export class AuthService {
           characterId: character.id,
           type: 'REGISTERED',
           message: `${character.name} entered Hibaro-5.`,
-          relatedEntities: startingLocation ?? undefined,
+          ...(startingLocation ? { relatedEntities: startingLocation } : {}),
         },
       });
 
@@ -192,24 +185,11 @@ export class AuthService {
   }
 
   private async hashPassword(password: string) {
-    const salt = randomBytes(16).toString('hex');
-    const hash = await this.derivePasswordKey(password, salt);
-    return `${salt}:${hash.toString('hex')}`;
+    return hashPassword(password);
   }
 
   private async verifyPassword(password: string, passwordHash: string) {
-    const [salt, storedHash] = passwordHash.split(':');
-    if (!salt || !storedHash) {
-      return false;
-    }
-
-    const candidateHash = await this.derivePasswordKey(password, salt);
-    const storedHashBuffer = Buffer.from(storedHash, 'hex');
-    if (storedHashBuffer.length !== candidateHash.length) {
-      return false;
-    }
-
-    return timingSafeEqual(storedHashBuffer, candidateHash);
+    return verifyPassword(password, passwordHash);
   }
 
   private async buildAuthResponse(player: {
@@ -244,24 +224,5 @@ export class AuthService {
     const safePlayer: Partial<typeof player> = { ...player };
     delete safePlayer.passwordHash;
     return safePlayer as SafePlayer;
-  }
-
-  private async derivePasswordKey(password: string, salt: string) {
-    return new Promise<Buffer>((resolve, reject) => {
-      scryptCallback(
-        password,
-        salt,
-        PASSWORD_HASH_KEY_LENGTH,
-        PASSWORD_HASH_OPTIONS,
-        (error, derivedKey) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve(derivedKey as Buffer);
-        },
-      );
-    });
   }
 }
