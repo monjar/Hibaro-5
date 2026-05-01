@@ -4,7 +4,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CharacterStats, Requirement, RequirementContext, checkRequirements } from '@heliora/game-rules';
+import {
+  CharacterStats,
+  OpportunityDefinition as GameRulesOpportunityDefinition,
+  Requirement,
+  RequirementContext,
+  Reward as GameRulesReward,
+  Risk as GameRulesRisk,
+  calculateOpportunitySuccessChance,
+  checkRequirements,
+  getOpportunityCheckProfile,
+  rollOpportunityCheck,
+} from '@heliora/game-rules';
 import { ActivityType, OpportunityType, RelationshipType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { JobsService } from '../jobs/jobs.service';
@@ -61,7 +72,7 @@ export class OpportunitiesService {
         description: data.description ?? null,
         kind: data.kind,
         type: data.type as OpportunityType,
-        difficulty: data.difficulty ?? 1,
+        difficulty: data.difficulty ?? 10,
         durationMinutes: data.durationMinutes ?? 60,
         requirements: (data.requirements ?? []) as never,
         rewards: (data.rewards ?? []) as never,
@@ -123,8 +134,8 @@ export class OpportunitiesService {
     if (!['GIG', 'JOB', 'QUEST'].includes(input.kind)) {
       throw new BadRequestException('Kind must be GIG, JOB, or QUEST');
     }
-    if (input.difficulty !== undefined && (input.difficulty < 1 || input.difficulty > 10)) {
-      throw new BadRequestException('Difficulty must be between 1 and 10');
+    if (input.difficulty !== undefined && (input.difficulty < 8 || input.difficulty > 30)) {
+      throw new BadRequestException('Difficulty must be between 8 and 30');
     }
     if (input.durationMinutes !== undefined && input.durationMinutes < 1) {
       throw new BadRequestException('durationMinutes must be at least 1');
@@ -336,9 +347,12 @@ export class OpportunitiesService {
       delta: number;
     }> = [];
 
-    const successChance = this.calculateSuccessChance(character, definition);
-    const roll = Math.random();
-    const success = roll <= successChance;
+    const rulesCharacter = this.toCharacterStats(character);
+    const rulesDefinition = this.toGameRulesOpportunity(definition);
+    const successChance = calculateOpportunitySuccessChance(rulesCharacter, rulesDefinition);
+    const check = rollOpportunityCheck(rulesCharacter, rulesDefinition);
+    const checkProfile = getOpportunityCheckProfile(rulesCharacter, rulesDefinition);
+    const success = check.success;
 
     const rewards = definition.rewards as any[];
     const risks = definition.risks as any[];
@@ -458,8 +472,13 @@ export class OpportunitiesService {
 
     const outcome = {
       success,
-      roll: Math.round(roll * 100) / 100,
+      roll: check.d20Roll,
       successChance: Math.round(successChance * 100) / 100,
+      checkTotal: check.checkTotal,
+      difficultyClass: check.difficultyClass,
+      statModifier: Number(check.statModifier.toFixed(1)),
+      relevantStatTotal: check.relevantStatTotal,
+      checkLabel: checkProfile.label,
       appliedRewards,
       appliedRisks,
       characterLedger: {
@@ -555,44 +574,6 @@ export class OpportunitiesService {
       default:
         return 'GIG_COMPLETED';
     }
-  }
-
-  private calculateSuccessChance(character: any, definition: any): number {
-    let chance = 0.7;
-    chance -= (definition.difficulty || 1) * 0.08;
-
-    const type = definition.type;
-    const statBonus = (stat: number) => (stat || 0) * 0.005;
-
-    switch (type) {
-      case 'HACKING':
-        chance += statBonus((character.hacking || 0) + (character.intelligence || 0));
-        break;
-      case 'SMUGGLING':
-        chance += statBonus((character.stealth || 0) + (character.charisma || 0));
-        break;
-      case 'BOUNTY':
-      case 'ASSASSINATION':
-        chance += statBonus((character.combat || 0) + (character.agility || 0));
-        break;
-      case 'REPAIR':
-        chance += statBonus((character.engineering || 0) + (character.intelligence || 0));
-        break;
-      case 'DELIVERY':
-        chance += statBonus(character.agility || 0);
-        break;
-      case 'DIPLOMACY':
-        chance += statBonus(character.charisma || 0);
-        break;
-      case 'MINING':
-        chance += statBonus((character.strength || 0) + (character.engineering || 0));
-        break;
-      case 'INVESTIGATION':
-        chance += statBonus((character.intelligence || 0) + (character.charisma || 0));
-        break;
-    }
-
-    return Math.min(0.95, Math.max(0.05, chance));
   }
 
   private async upsertRelationship(
@@ -713,12 +694,33 @@ export class OpportunitiesService {
     };
   }
 
+  private toGameRulesOpportunity(
+    definition: Record<string, unknown>,
+  ): GameRulesOpportunityDefinition {
+    return {
+      id: String(definition.id),
+      title: String(definition.title),
+      kind: definition.kind as GameRulesOpportunityDefinition['kind'],
+      type: definition.type as GameRulesOpportunityDefinition['type'],
+      difficulty: Number(definition.difficulty ?? 10),
+      requirements: this.readRequirements(definition.requirements),
+      rewards: this.readRewards(definition.rewards),
+      risks: this.readRisks(definition.risks),
+      durationMinutes:
+        typeof definition.durationMinutes === 'number' ? definition.durationMinutes : undefined,
+    };
+  }
+
   private readRequirements(value: unknown): Requirement[] {
     return Array.isArray(value) ? (value as Requirement[]) : [];
   }
 
-  private readRewards(value: unknown): RewardEntry[] {
-    return Array.isArray(value) ? (value as RewardEntry[]) : [];
+  private readRewards(value: unknown): GameRulesReward[] {
+    return Array.isArray(value) ? (value as GameRulesReward[]) : [];
+  }
+
+  private readRisks(value: unknown): GameRulesRisk[] {
+    return Array.isArray(value) ? (value as GameRulesRisk[]) : [];
   }
 
   private readQuestData(value: unknown): QuestDataEntry | null {

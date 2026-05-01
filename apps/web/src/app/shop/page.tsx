@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { useAuthGuard } from '@/lib/session-context';
 import { useCharacter } from '@/lib/use-character';
 import { Panel } from '@/components/Panel';
+import { describeItemFeatures, formatUiError } from '@/lib/ui-presenters';
 import type { InventoryItem, ShopListing } from '@heliora/platform-sdk';
 
 const SHOP_FUNCS = ['SHOP', 'BLACK_MARKET', 'CLINIC'];
@@ -61,7 +62,7 @@ export default function ShopPage() {
       setMessage(`✅ Bought ${name} for $${price}`);
       await Promise.all([reload(), refresh()]);
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message.replace(/^API error \d+: /, '')}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setBusy(null);
       setTimeout(() => setMessage(''), 4000);
@@ -79,7 +80,7 @@ export default function ShopPage() {
       setMessage(`✅ Sold ${name} for $${r.price ?? '?'}`);
       await Promise.all([reload(), refresh()]);
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message.replace(/^API error \d+: /, '')}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setBusy(null);
       setTimeout(() => setMessage(''), 4000);
@@ -143,6 +144,7 @@ export default function ShopPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {listing.stock.map((item) => {
               const cantAfford = (character?.credits ?? 0) < item.priceCredits;
+              const featureLines = describeItemFeatures(item);
               return (
                 <div
                   key={item.id}
@@ -171,6 +173,11 @@ export default function ShopPage() {
                   <div className="flex items-center justify-between text-xs text-heliora-text-dim mb-2">
                     <span>{item.condition}% cond</span>
                     <span>{item.weight}kg</span>
+                  </div>
+                  <div className="mb-2 rounded border border-heliora-border/60 bg-black/10 p-2 text-xs text-heliora-text-dim">
+                    {featureLines.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
                   </div>
                   <button
                     onClick={() => void buy(item.id, item.name, item.priceCredits)}
@@ -207,6 +214,7 @@ export default function ShopPage() {
                 1,
                 Math.round(item.itemDefinition.baseValue * 0.55 * (item.condition / 100)),
               );
+              const featureLines = describeItemFeatures(item.itemDefinition);
               return (
                 <div
                   key={item.id}
@@ -222,6 +230,11 @@ export default function ShopPage() {
                   <p className="text-heliora-text-dim text-[10px] uppercase tracking-wider">
                     {item.itemDefinition.category} ∷ {item.condition}%
                   </p>
+                  <div className="mt-2 rounded border border-heliora-border/60 bg-black/10 p-2 text-xs text-heliora-text-dim">
+                    {featureLines.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </div>
                   <button
                     onClick={() => void sell(item.id, item.itemDefinition.name)}
                     disabled={busy === `sell-${item.id}` || isQuest}

@@ -7,8 +7,17 @@ import { useAuthGuard } from '@/lib/session-context';
 import { useCharacter, useNow } from '@/lib/use-character';
 import { useEventStream } from '@/lib/use-event-stream';
 import { Panel } from '@/components/Panel';
+import { Tooltip } from '@/components/Tooltip';
 import { StatBar, StatPill } from '@/components/StatBar';
 import { KindBadge, StatusBadge } from '@/components/KindBadge';
+import {
+  describeRewardTooltip,
+  describeWorldEventEffects,
+  formatRewardBadgeLabel,
+  formatOpportunityCheckHint,
+  formatUiError,
+} from '@/lib/ui-presenters';
+import { useRewardReferenceLookup } from '@/lib/use-reward-reference-lookup';
 import type {
   ActivityLog,
   OpportunityDefinition,
@@ -64,6 +73,7 @@ export default function HomePage() {
   const [resolving, setResolving] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const now = useNow();
+  const rewardReferenceLookup = useRewardReferenceLookup();
 
   const refreshAll = useCallback(async () => {
     if (!session.characterId || !session.player?.id) return;
@@ -114,7 +124,7 @@ export default function HomePage() {
       }
       await refreshAll();
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setResolving(null);
       setTimeout(() => setMessage(''), 5000);
@@ -288,6 +298,18 @@ export default function HomePage() {
                   Scope: {event.scope}
                   {event.endsAt && ` · ends in ${formatTimeLeft(event.endsAt)}`}
                 </p>
+                {describeWorldEventEffects(event.effects).length > 0 && (
+                  <div className="mt-2 rounded border border-heliora-red/20 bg-black/10 p-2">
+                    <p className="text-[10px] uppercase tracking-wider text-heliora-text-dim">
+                      World Effects
+                    </p>
+                    <div className="mt-1 space-y-1 text-xs text-heliora-text-dim">
+                      {describeWorldEventEffects(event.effects).map((effect) => (
+                        <p key={effect}>{effect}</p>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -348,7 +370,36 @@ export default function HomePage() {
                       <span className="text-heliora-text font-mono text-sm">
                         {inst.definition.title}
                       </span>
+                      <Tooltip content={formatOpportunityCheckHint(inst.definition)}>
+                        <span className="rounded border border-heliora-border px-2 py-0.5 text-[10px] text-heliora-text-dim">
+                          DC {inst.definition.difficulty}
+                        </span>
+                      </Tooltip>
                     </div>
+                    {inst.definition.description && (
+                      <p className="max-w-xl text-xs text-heliora-text-dim">
+                        {inst.definition.description}
+                      </p>
+                    )}
+                    {Array.isArray(inst.definition.rewards) && inst.definition.rewards.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(inst.definition.rewards as Array<Record<string, unknown>>).map((reward, index) => (
+                          <Tooltip
+                            key={`${inst.id}-reward-${index}`}
+                            content={describeRewardTooltip(reward, rewardReferenceLookup)}
+                          >
+                            <span className="rounded border border-heliora-cyan/30 px-2 py-0.5 text-[10px] text-heliora-cyan">
+                              {formatRewardBadgeLabel(reward, rewardReferenceLookup)}
+                            </span>
+                          </Tooltip>
+                        ))}
+                      </div>
+                    )}
+                    {inst.definition.questData?.hint && (
+                      <p className="mt-1 text-[11px] text-heliora-text-dim">
+                        Hint: {inst.definition.questData.hint}
+                      </p>
+                    )}
                     <div className="text-heliora-text-dim text-xs">
                       {formatTimeLeft(inst.completesAt)}
                     </div>
@@ -467,7 +518,7 @@ function RestButton({ canRest, onComplete }: { canRest: boolean; onComplete: () 
       await api.rest(session.characterId);
       onComplete();
     } catch (e) {
-      setError((e as Error).message);
+      setError(formatUiError(e));
       setTimeout(() => setError(''), 4000);
     } finally {
       setBusy(false);
@@ -486,7 +537,7 @@ function RestButton({ canRest, onComplete }: { canRest: boolean; onComplete: () 
       </button>
       {error && (
         <div className="absolute top-full left-0 right-0 mt-1 text-[10px] text-heliora-red text-center">
-          {error.replace(/^API error \d+: /, '').slice(0, 80)}
+          {error.slice(0, 80)}
         </div>
       )}
     </div>

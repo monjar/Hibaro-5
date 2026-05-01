@@ -23,7 +23,7 @@ const baseCharacter: CharacterStats = {
 
 const makeOpportunity = (
   type: OpportunityDefinition['type'],
-  difficulty = 1,
+  difficulty = 10,
 ): OpportunityDefinition => ({
   id: 'opp-1',
   title: 'Test Opportunity',
@@ -45,11 +45,11 @@ describe('calculateOpportunitySuccessChance', () => {
   it('is lower for harder opportunities', () => {
     const easyChance = calculateOpportunitySuccessChance(
       baseCharacter,
-      makeOpportunity('DELIVERY', 1),
+      makeOpportunity('DELIVERY', 10),
     );
     const hardChance = calculateOpportunitySuccessChance(
       baseCharacter,
-      makeOpportunity('DELIVERY', 5),
+      makeOpportunity('DELIVERY', 18),
     );
     expect(easyChance).toBeGreaterThan(hardChance);
   });
@@ -57,16 +57,16 @@ describe('calculateOpportunitySuccessChance', () => {
   it('benefits from relevant stat for HACKING type', () => {
     const lowHackChar = { ...baseCharacter, hacking: 1, intelligence: 1 };
     const highHackChar = { ...baseCharacter, hacking: 20, intelligence: 20 };
-    const lowChance = calculateOpportunitySuccessChance(lowHackChar, makeOpportunity('HACKING'));
-    const highChance = calculateOpportunitySuccessChance(highHackChar, makeOpportunity('HACKING'));
+    const lowChance = calculateOpportunitySuccessChance(lowHackChar, makeOpportunity('HACKING', 18));
+    const highChance = calculateOpportunitySuccessChance(highHackChar, makeOpportunity('HACKING', 18));
     expect(highChance).toBeGreaterThan(lowChance);
   });
 
   it('benefits from stealth+charisma for SMUGGLING type', () => {
     const lowChar = { ...baseCharacter, stealth: 1, charisma: 1 };
     const highChar = { ...baseCharacter, stealth: 20, charisma: 20 };
-    const lowChance = calculateOpportunitySuccessChance(lowChar, makeOpportunity('SMUGGLING'));
-    const highChance = calculateOpportunitySuccessChance(highChar, makeOpportunity('SMUGGLING'));
+    const lowChance = calculateOpportunitySuccessChance(lowChar, makeOpportunity('SMUGGLING', 18));
+    const highChance = calculateOpportunitySuccessChance(highChar, makeOpportunity('SMUGGLING', 18));
     expect(highChance).toBeGreaterThan(lowChance);
   });
 
@@ -82,7 +82,7 @@ describe('calculateOpportunitySuccessChance', () => {
       engineering: 1,
       charisma: 1,
     };
-    const chance = calculateOpportunitySuccessChance(lowChar, makeOpportunity('HACKING', 10));
+    const chance = calculateOpportunitySuccessChance(lowChar, makeOpportunity('HACKING', 30));
     expect(chance).toBeGreaterThanOrEqual(0.05);
   });
 });

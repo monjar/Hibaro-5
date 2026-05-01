@@ -1066,7 +1066,7 @@ async function main() {
   // GIG 1: Move the Medical Crates
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-move-medical-crates' },
-    update: {},
+    update: { difficulty: 12 },
     create: {
       id: 'opp-move-medical-crates',
       title: 'Move the Medical Crates',
@@ -1078,7 +1078,7 @@ async function main() {
       type: 'SMUGGLING',
       requirements: [{ type: 'STAT_MIN', key: 'stealth', value: 5 }],
       durationMinutes: 10,
-      difficulty: 2,
+      difficulty: 12,
       rewards: [
         { type: 'CREDITS', value: 300 },
         { type: 'FACTION_REPUTATION', factionId: redMarket.id, value: 5 },
@@ -1099,7 +1099,7 @@ async function main() {
   // GIG 2: Patch the Furnace Sensors
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-patch-furnace-sensors' },
-    update: {},
+    update: { difficulty: 12 },
     create: {
       id: 'opp-patch-furnace-sensors',
       title: 'Patch the Furnace Sensors',
@@ -1111,7 +1111,7 @@ async function main() {
       type: 'REPAIR',
       requirements: [{ type: 'STAT_MIN', key: 'engineering', value: 5 }],
       durationMinutes: 15,
-      difficulty: 2,
+      difficulty: 12,
       rewards: [
         { type: 'CREDITS', value: 350 },
         { type: 'CORPORATION_REPUTATION', corporationId: helixDynamics.id, value: 5 },
@@ -1132,7 +1132,7 @@ async function main() {
   // JOB 1: Worker Shift at Furnace Row
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-furnace-worker-shift' },
-    update: {},
+    update: { difficulty: 10 },
     create: {
       id: 'opp-furnace-worker-shift',
       title: 'Worker Shift at Furnace Row',
@@ -1144,7 +1144,7 @@ async function main() {
       type: 'REPAIR',
       requirements: [],
       durationMinutes: 30,
-      difficulty: 1,
+      difficulty: 10,
       rewards: [
         { type: 'CREDITS', value: 200 },
         { type: 'STAT_XP', key: 'engineering', value: 1 },
@@ -1158,7 +1158,7 @@ async function main() {
   // JOB 2: Courier Loop
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-courier-loop' },
-    update: {},
+    update: { difficulty: 10 },
     create: {
       id: 'opp-courier-loop',
       title: 'Courier Loop',
@@ -1169,7 +1169,7 @@ async function main() {
       type: 'DELIVERY',
       requirements: [],
       durationMinutes: 20,
-      difficulty: 1,
+      difficulty: 10,
       rewards: [
         { type: 'CREDITS', value: 180 },
         { type: 'CORPORATION_REPUTATION', corporationId: pigeonCorp.id, value: 2 },
@@ -1183,7 +1183,7 @@ async function main() {
   // QUEST 1: Welcome to Antrolus
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-quest-welcome-antrolus' },
-    update: {},
+    update: { difficulty: 10 },
     create: {
       id: 'opp-quest-welcome-antrolus',
       title: 'Welcome to Antrolus',
@@ -1194,7 +1194,7 @@ async function main() {
       type: 'STORY',
       requirements: [],
       durationMinutes: null,
-      difficulty: 1,
+      difficulty: 10,
       rewards: [
         { type: 'CREDITS', value: 100 },
         { type: 'UNLOCK_BUILDING', buildingId: 'bldg-antrolus-black-market' },
@@ -1215,7 +1215,7 @@ async function main() {
   // QUEST 2: Something in the Cargo
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-quest-something-in-cargo' },
-    update: {},
+    update: { difficulty: 12 },
     create: {
       id: 'opp-quest-something-in-cargo',
       title: 'Something in the Cargo',
@@ -1227,7 +1227,7 @@ async function main() {
       type: 'STORY',
       requirements: [],
       durationMinutes: null,
-      difficulty: 2,
+      difficulty: 12,
       rewards: [
         { type: 'FACTION_REPUTATION', factionId: coilUnion.id, value: 5 },
         { type: 'UNLOCK_QUEST', questId: 'opp-quest-pigeon95-secret' },
@@ -1248,7 +1248,7 @@ async function main() {
   // QUEST 3: Pigeon95 Secret
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-quest-pigeon95-secret' },
-    update: {},
+    update: { difficulty: 14 },
     create: {
       id: 'opp-quest-pigeon95-secret',
       title: 'Pigeon95 Secret',
@@ -1262,7 +1262,7 @@ async function main() {
         { type: 'CORPORATION_REPUTATION_MAX', id: pigeonCorp.id, value: 15 },
       ],
       durationMinutes: 90,
-      difficulty: 3,
+      difficulty: 14,
       rewards: [
         { type: 'CREDITS', value: 180 },
         { type: 'FACTION_REPUTATION', factionId: coilUnion.id, value: 8 },

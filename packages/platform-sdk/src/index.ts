@@ -442,9 +442,11 @@ export interface ShopItem {
   contraband: boolean;
   priceCredits: number;
   effects?: unknown;
+  requirements?: unknown;
   weaponData?: unknown;
   clothingData?: unknown;
   toolData?: unknown;
+  vehicleData?: unknown;
 }
 
 export interface ShopListing {
@@ -476,6 +478,11 @@ export interface InventoryItem {
     baseValue: number;
     weight: number;
     effects?: unknown;
+    requirements?: unknown;
+    weaponData?: unknown;
+    clothingData?: unknown;
+    toolData?: unknown;
+    vehicleData?: unknown;
   };
 }
 
@@ -708,6 +715,33 @@ export interface ApiClientConfig {
   getAdminToken?: () => string | null | undefined;
 }
 
+function extractErrorMessage(payload: unknown): string {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+
+  if (Array.isArray(payload)) {
+    const messages = payload
+      .map((entry) => extractErrorMessage(entry))
+      .filter((entry) => entry.trim().length > 0);
+    return messages.join(' ');
+  }
+
+  if (payload && typeof payload === 'object') {
+    const record = payload as Record<string, unknown>;
+
+    if ('message' in record) {
+      return extractErrorMessage(record.message);
+    }
+
+    if ('error' in record) {
+      return extractErrorMessage(record.error);
+    }
+  }
+
+  return 'Request failed.';
+}
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
@@ -734,8 +768,16 @@ export async function apiFetch<T>(
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`API error ${response.status}: ${error}`);
+    const rawError = await response.text();
+    let parsedError: unknown = rawError;
+
+    try {
+      parsedError = rawError ? JSON.parse(rawError) : rawError;
+    } catch {
+      parsedError = rawError;
+    }
+
+    throw new Error(`API error ${response.status}: ${extractErrorMessage(parsedError)}`);
   }
 
   return response.json() as Promise<T>;

@@ -6,16 +6,15 @@ import {
   RiskConsequence,
   Reward,
 } from './types';
-import { calculateOpportunitySuccessChance } from './success-chance';
+import { rollOpportunityCheck } from './success-chance';
 
 export function rollOpportunityOutcome(
   character: CharacterStats,
   opportunity: OpportunityDefinition,
   randomSeed?: number,
 ): OpportunityOutcome {
-  const successChance = calculateOpportunitySuccessChance(character, opportunity);
-  const roll = randomSeed !== undefined ? randomSeed : Math.random();
-  const success = roll <= successChance;
+  const check = rollOpportunityCheck(character, opportunity, randomSeed);
+  const success = check.success;
 
   const appliedRewards: Reward[] = [];
   const triggeredRisks: { risk: Risk; consequences: RiskConsequence[] }[] = [];
@@ -38,8 +37,13 @@ export function rollOpportunityOutcome(
 
   return {
     success,
-    roll: Math.round(roll * 1000) / 1000,
-    successChance: Math.round(successChance * 1000) / 1000,
+    roll: check.d20Roll,
+    successChance: Math.round(check.successChance * 1000) / 1000,
+    checkTotal: check.checkTotal,
+    difficultyClass: check.difficultyClass,
+    statModifier: check.statModifier,
+    relevantStatTotal: check.relevantStatTotal,
+    checkLabel: check.label,
     appliedRewards,
     triggeredRisks,
   };

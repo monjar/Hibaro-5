@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { useAuthGuard } from '@/lib/session-context';
 import { useCharacter } from '@/lib/use-character';
 import { Panel } from '@/components/Panel';
+import { describeItemFeatures, formatUiError } from '@/lib/ui-presenters';
 import type { InventoryItem } from '@heliora/platform-sdk';
 
 const RARITY_COLORS: Record<string, string> = {
@@ -59,7 +60,7 @@ export default function InventoryPage() {
       setMessage(`✅ Used ${name}`);
       await Promise.all([reload(), refresh()]);
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message.replace(/^API error \d+: /, '')}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setBusy(null);
       setTimeout(() => setMessage(''), 3500);
@@ -96,6 +97,7 @@ export default function InventoryPage() {
             {items.map((item) => {
               const isConsumable = item.itemDefinition.category === 'CONSUMABLE';
               const isQuest = item.itemDefinition.category === 'QUEST_ITEM';
+              const featureLines = describeItemFeatures(item.itemDefinition);
               return (
                 <div
                   key={item.id}
@@ -125,6 +127,16 @@ export default function InventoryPage() {
                   <div className="flex items-center justify-between text-xs text-heliora-text-dim">
                     <span>Base value ${item.itemDefinition.baseValue.toFixed(0)}</span>
                     <span>{item.itemDefinition.weight}kg</span>
+                  </div>
+                  <div className="mt-3 rounded border border-heliora-border/60 bg-black/10 p-2">
+                    <p className="text-[10px] uppercase tracking-wider text-heliora-text-dim">
+                      What It Does
+                    </p>
+                    <div className="mt-1 space-y-1 text-xs text-heliora-text-dim">
+                      {featureLines.map((line) => (
+                        <p key={line}>{line}</p>
+                      ))}
+                    </div>
                   </div>
                   {isConsumable && (
                     <button

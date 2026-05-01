@@ -6,7 +6,15 @@ import { useAuthGuard } from '@/lib/session-context';
 import { useCharacter, useNow } from '@/lib/use-character';
 import { useEventStream } from '@/lib/use-event-stream';
 import { Panel } from '@/components/Panel';
+import { Tooltip } from '@/components/Tooltip';
 import { KindBadge, StatusBadge } from '@/components/KindBadge';
+import {
+  describeRewardTooltip,
+  formatRewardBadgeLabel,
+  formatOpportunityCheckHint,
+  formatUiError,
+} from '@/lib/ui-presenters';
+import { useRewardReferenceLookup } from '@/lib/use-reward-reference-lookup';
 import type {
   JobEmployment,
   OpportunityDefinition,
@@ -27,6 +35,7 @@ export default function OpportunitiesPage() {
   const [hiringFor, setHiringFor] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const now = useNow();
+  const rewardReferenceLookup = useRewardReferenceLookup();
 
   const refresh = useCallback(async () => {
     if (!session.characterId) return;
@@ -61,7 +70,7 @@ export default function OpportunitiesPage() {
       setMessage(`✅ Accepted: ${opp.title}`);
       await refresh();
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message.replace(/^API error \d+: /, '')}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setAccepting(null);
       setTimeout(() => setMessage(''), 4500);
@@ -77,7 +86,7 @@ export default function OpportunitiesPage() {
       setMessage(`✅ Hired at ${opp.title}`);
       await refresh();
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message.replace(/^API error \d+: /, '')}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setHiringFor(null);
       setTimeout(() => setMessage(''), 4500);
@@ -92,7 +101,7 @@ export default function OpportunitiesPage() {
       setMessage(`✅ Quit ${title}`);
       await refresh();
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message.replace(/^API error \d+: /, '')}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setHiringFor(null);
       setTimeout(() => setMessage(''), 4500);
@@ -115,7 +124,7 @@ export default function OpportunitiesPage() {
       );
       await refresh();
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message.replace(/^API error \d+: /, '')}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setResolving(null);
       setTimeout(() => setMessage(''), 4500);
@@ -189,7 +198,9 @@ export default function OpportunitiesPage() {
             <KindBadge kind={opp.kind} />
             <span className="text-xs text-heliora-text-dim">{opp.type}</span>
           </div>
-          <span className="text-xs text-heliora-text-dim">⚡ Diff {opp.difficulty}</span>
+          <Tooltip content={formatOpportunityCheckHint(opp)}>
+            <span className="text-xs text-heliora-text-dim">DC {opp.difficulty}</span>
+          </Tooltip>
         </div>
         <h3 className="mb-1 text-sm font-bold text-heliora-text">{opp.title}</h3>
         <p className="mb-2 line-clamp-3 text-xs text-heliora-text-dim">{opp.description}</p>
@@ -206,37 +217,92 @@ export default function OpportunitiesPage() {
           {(opp.rewards as RewardEntry[]).map((reward, index) => {
             if (reward.type === 'CREDITS') {
               return (
-                <span key={`${opp.id}-reward-${index}`} className="font-bold text-heliora-green">
-                  +${reward.value}
-                </span>
+                <Tooltip
+                  key={`${opp.id}-reward-${index}`}
+                  content={describeRewardTooltip(
+                    reward as unknown as Record<string, unknown>,
+                    rewardReferenceLookup,
+                  )}
+                >
+                  <span className="font-bold text-heliora-green">
+                    {formatRewardBadgeLabel(
+                      reward as unknown as Record<string, unknown>,
+                      rewardReferenceLookup,
+                    )}
+                  </span>
+                </Tooltip>
               );
             }
             if (reward.type === 'FACTION_REPUTATION') {
               return (
-                <span key={`${opp.id}-reward-${index}`} className="text-heliora-yellow">
-                  +{reward.value} REP
-                </span>
+                <Tooltip
+                  key={`${opp.id}-reward-${index}`}
+                  content={describeRewardTooltip(
+                    reward as unknown as Record<string, unknown>,
+                    rewardReferenceLookup,
+                  )}
+                >
+                  <span className="text-heliora-yellow">
+                    {formatRewardBadgeLabel(
+                      reward as unknown as Record<string, unknown>,
+                      rewardReferenceLookup,
+                    )}
+                  </span>
+                </Tooltip>
               );
             }
             if (reward.type === 'CORPORATION_REPUTATION') {
               return (
-                <span key={`${opp.id}-reward-${index}`} className="text-heliora-cyan">
-                  +{reward.value} CORP
-                </span>
+                <Tooltip
+                  key={`${opp.id}-reward-${index}`}
+                  content={describeRewardTooltip(
+                    reward as unknown as Record<string, unknown>,
+                    rewardReferenceLookup,
+                  )}
+                >
+                  <span className="text-heliora-cyan">
+                    {formatRewardBadgeLabel(
+                      reward as unknown as Record<string, unknown>,
+                      rewardReferenceLookup,
+                    )}
+                  </span>
+                </Tooltip>
               );
             }
             if (reward.type === 'STAT_XP') {
               return (
-                <span key={`${opp.id}-reward-${index}`} className="text-heliora-orange">
-                  +{reward.value} XP {reward.key}
-                </span>
+                <Tooltip
+                  key={`${opp.id}-reward-${index}`}
+                  content={describeRewardTooltip(
+                    reward as unknown as Record<string, unknown>,
+                    rewardReferenceLookup,
+                  )}
+                >
+                  <span className="text-heliora-orange">
+                    {formatRewardBadgeLabel(
+                      reward as unknown as Record<string, unknown>,
+                      rewardReferenceLookup,
+                    )}
+                  </span>
+                </Tooltip>
               );
             }
             if (reward.type === 'ITEM') {
               return (
-                <span key={`${opp.id}-reward-${index}`} className="text-heliora-cyan">
-                  Item reward
-                </span>
+                <Tooltip
+                  key={`${opp.id}-reward-${index}`}
+                  content={describeRewardTooltip(
+                    reward as unknown as Record<string, unknown>,
+                    rewardReferenceLookup,
+                  )}
+                >
+                  <span className="text-heliora-cyan">
+                    {formatRewardBadgeLabel(
+                      reward as unknown as Record<string, unknown>,
+                      rewardReferenceLookup,
+                    )}
+                  </span>
+                </Tooltip>
               );
             }
             return null;
@@ -341,6 +407,11 @@ export default function OpportunitiesPage() {
                       <span className="text-heliora-text font-mono text-sm">
                         {inst.definition.title}
                       </span>
+                      <Tooltip content={formatOpportunityCheckHint(inst.definition)}>
+                        <span className="rounded border border-heliora-border px-2 py-0.5 text-[10px] text-heliora-text-dim">
+                          DC {inst.definition.difficulty}
+                        </span>
+                      </Tooltip>
                     </div>
                     {isReady ? (
                       <button
@@ -362,6 +433,16 @@ export default function OpportunitiesPage() {
                       style={{ width: `${pct}%` }}
                     />
                   </div>
+                  {inst.definition.description && (
+                    <p className="mt-2 text-xs text-heliora-text-dim">
+                      {inst.definition.description}
+                    </p>
+                  )}
+                  {inst.definition.questData?.hint && (
+                    <p className="mt-1 text-[11px] text-heliora-text-dim">
+                      Hint: {inst.definition.questData.hint}
+                    </p>
+                  )}
                 </div>
               );
             })}

@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { useAuthGuard } from '@/lib/session-context';
 import { useCharacter } from '@/lib/use-character';
 import { Panel } from '@/components/Panel';
+import { formatUiError } from '@/lib/ui-presenters';
 import type { TravelQuote } from '@heliora/platform-sdk';
 
 interface BuildingEntry {
@@ -85,7 +86,7 @@ export default function TravelPage() {
       const q = await api.travelQuote(session.characterId, { planetId, districtId, buildingId });
       setQuote(q);
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message.replace(/^API error \d+: /, '')}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     }
   }
 
@@ -100,7 +101,7 @@ export default function TravelPage() {
       setQuote(null);
       setTarget({});
     } catch (e) {
-      setMessage(`❌ ${(e as Error).message.replace(/^API error \d+: /, '')}`);
+      setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setBusy(false);
       setTimeout(() => setMessage(''), 4000);
@@ -178,7 +179,8 @@ export default function TravelPage() {
               )}
               {(selectedPlanet.districts ?? []).map((d) => {
                 const here = d.id === currentDistrictId;
-                const active = d.id === districtDetail?.id;
+                const active = d.id === target.districtId;
+                const dimmed = Boolean(target.districtId) && !active;
                 return (
                   <button
                     key={d.id}
@@ -189,7 +191,9 @@ export default function TravelPage() {
                     className={`w-full text-left border rounded p-2 transition-colors ${
                       active
                         ? 'border-heliora-cyan/60 bg-heliora-cyan/10'
-                        : 'border-heliora-border hover:border-heliora-cyan/30'
+                        : dimmed
+                          ? 'border-heliora-border opacity-45 blur-[1px]'
+                          : 'border-heliora-border hover:border-heliora-cyan/30'
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -225,12 +229,20 @@ export default function TravelPage() {
                 const fn = asArray(b.functionality);
                 const here = b.id === currentBuildingId;
                 const closed = b.status !== 'OPEN';
+                const active = b.id === target.buildingId;
+                const dimmed = Boolean(target.buildingId) && !active;
                 return (
                   <button
                     key={b.id}
                     onClick={() => void fetchQuote(selectedPlanet!.id, districtDetail.id, b.id)}
                     disabled={closed}
-                    className="w-full text-left border border-heliora-border rounded p-2 hover:border-heliora-cyan/30 disabled:opacity-50"
+                    className={`w-full text-left border rounded p-2 transition-all hover:border-heliora-cyan/30 disabled:opacity-50 ${
+                      active
+                        ? 'border-heliora-cyan/60 bg-heliora-cyan/10'
+                        : dimmed
+                          ? 'border-heliora-border opacity-40 blur-[1px]'
+                          : 'border-heliora-border'
+                    }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-heliora-text font-mono text-sm">

@@ -135,6 +135,11 @@ export interface OpportunityOutcome {
   success: boolean;
   roll: number;
   successChance: number;
+  checkTotal: number;
+  difficultyClass: number;
+  statModifier: number;
+  relevantStatTotal: number;
+  checkLabel: string;
   appliedRewards: Reward[];
   triggeredRisks: { risk: Risk; consequences: RiskConsequence[] }[];
 }

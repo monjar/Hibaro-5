@@ -1,0 +1,12 @@
+Bugs:
+1. When an error happens, for example traveling to a city you already in or something it just shows the json error from the backend. add frontend friendly error handling
+2. Update the roll/chance system to a D&D like system of adding a d20 to the stat/10 and comparing to the DC of the job/quest/activity. this will require updating the existing activities in the database
+3. its not clear what do the items do for example 🛠️ Smuggler Toolkit is in my inventroy but IDK what its for
+4. in the travel menu, moving the frontend doesn't handle selecting buildings currectly. blur the unselected items when user selects something
+
+Features needed:
+1. The world events should have a section that shows what is their effect in the world. for example some stock goes up, or all smuggling gigs pay 2x or sth like that
+
+2. in the section that shows ACTIVE oportunities, lets show more info about the task/quest
+
+3. I want a tooltip to show up when user hovers on some of the elements. like the +5 REP in the jobs adverts and a loot of other things in the different dashboards

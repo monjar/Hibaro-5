@@ -12,6 +12,39 @@ import { assessTravel } from './travel.utils';
 export class CharactersService {
   constructor(private prisma: PrismaService) {}
 
+  private async getActiveTravelBlock(characterId: string) {
+    const activeOpportunity = await this.prisma.opportunityInstance.findFirst({
+      where: {
+        characterId,
+        status: { in: ['ACCEPTED', 'IN_PROGRESS'] },
+      },
+      include: {
+        definition: {
+          select: {
+            title: true,
+            kind: true,
+          },
+        },
+      },
+    });
+
+    if (!activeOpportunity) {
+      return null;
+    }
+
+    const activityLabel =
+      activeOpportunity.definition.kind === 'JOB'
+        ? 'job'
+        : activeOpportunity.definition.kind === 'GIG'
+          ? 'gig'
+          : 'assignment';
+
+    return {
+      blocked: true,
+      warning: `Finish your current ${activityLabel}, ${activeOpportunity.definition.title}, before travelling.`,
+    } as const;
+  }
+
   private async getTravelStandingAdjustment(
     characterId: string,
     district: {
@@ -182,12 +215,13 @@ export class CharactersService {
       throw new BadRequestException('Travel quote requires a destination planet and district');
     }
 
-    const [destinationPlanet, destinationDistrict] = await Promise.all([
+    const [destinationPlanet, destinationDistrict, activeTravelBlock] = await Promise.all([
       this.prisma.planet.findUnique({ where: { id: destinationPlanetId } }),
       this.prisma.district.findUnique({
         where: { id: destinationDistrictId },
         include: { planet: true, controllingFaction: true },
       }),
+      this.getActiveTravelBlock(id),
     ]);
     if (!destinationPlanet) throw new NotFoundException('Planet not found');
     if (!destinationDistrict) throw new NotFoundException('District not found');
@@ -208,12 +242,17 @@ export class CharactersService {
 
     const standing = await this.getTravelStandingAdjustment(id, destinationDistrict);
     const travelCost = travel.travelCost + standing.travelSurcharge;
+    const warnings = [
+      ...(activeTravelBlock ? [activeTravelBlock.warning] : []),
+      ...standing.warnings,
+    ];
+    const blocked = Boolean(activeTravelBlock) || standing.blocked;
 
     return {
       ...travel,
       travelCost,
       travelSurcharge: standing.travelSurcharge,
-      blocked: standing.blocked,
+      blocked,
       destination: {
         planetId: destinationPlanet.id,
         planetName: destinationPlanet.name,
@@ -221,12 +260,12 @@ export class CharactersService {
         districtName: destinationDistrict.name,
         buildingId: dto.buildingId ?? null,
       },
-      affordable: !standing.blocked && character.credits >= travelCost,
+      affordable: !blocked && character.credits >= travelCost,
       currentCredits: character.credits,
       controllingFactionName: standing.controllingFactionName,
       reputationScore: standing.reputationScore,
       reputationModifier: standing.reputationModifier,
-      warnings: standing.warnings,
+      warnings,
     };
   }
 
@@ -403,7 +442,7 @@ export class CharactersService {
       throw new BadRequestException('Travel requires a destination planet and district');
     }
 
-    const [destinationPlanet, destinationDistrict, destinationBuilding] = await Promise.all([
+    const [destinationPlanet, destinationDistrict, destinationBuilding, activeTravelBlock] = await Promise.all([
       this.prisma.planet.findUnique({ where: { id: destinationPlanetId } }),
       this.prisma.district.findUnique({
         where: { id: destinationDistrictId },
@@ -412,6 +451,7 @@ export class CharactersService {
       destinationBuildingId
         ? this.prisma.building.findUnique({ where: { id: destinationBuildingId } })
         : Promise.resolve(null),
+      this.getActiveTravelBlock(id),
     ]);
 
     if (!destinationPlanet) throw new NotFoundException('Planet not found');
@@ -444,6 +484,9 @@ export class CharactersService {
     });
 
     const standing = await this.getTravelStandingAdjustment(id, destinationDistrict);
+    if (activeTravelBlock) {
+      throw new BadRequestException(activeTravelBlock.warning);
+    }
     if (standing.blocked) {
       throw new BadRequestException(standing.warnings[0] ?? 'Travel is blocked by local control');
     }
