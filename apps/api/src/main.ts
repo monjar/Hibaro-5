@@ -17,6 +17,7 @@ async function bootstrap() {
     .setTitle('Heliora API')
     .setDescription('Sci-fi idle RPG API for Hibaro-5')
     .setVersion('0.1.0')
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
