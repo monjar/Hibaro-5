@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { hashPasswordSync } from './password-hash';
 
 const prisma = new PrismaClient();
-const TEST_PLAYER_PASSWORD = process.env.SEED_TEST_PLAYER_PASSWORD ?? 'changeme123';
+const TEST_PLAYER_PASSWORD = process.env.SEED_TEST_PLAYER_PASSWORD ?? 'Heliora123';
 
 async function main() {
   console.log('🌌 Seeding Heliora / Hibaro-5...');
