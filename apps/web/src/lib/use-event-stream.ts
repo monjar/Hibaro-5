@@ -38,5 +38,5 @@ export function useEventStream(
       }
       eventSource.close();
     };
-  }, [enabled, eventSignature, eventTypes, onEvent]);
+  }, [enabled, eventSignature, onEvent]);
 }

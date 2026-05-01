@@ -4,12 +4,17 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useAuthGuard } from '@/lib/session-context';
-import { useCharacter } from '@/lib/use-character';
+import { useCharacter, useNow } from '@/lib/use-character';
 import { useEventStream } from '@/lib/use-event-stream';
 import { Panel } from '@/components/Panel';
 import { StatBar, StatPill } from '@/components/StatBar';
 import { KindBadge, StatusBadge } from '@/components/KindBadge';
-import type { ActivityLog, OpportunityInstance, WorldEvent } from '@heliora/platform-sdk';
+import type {
+  ActivityLog,
+  OpportunityDefinition,
+  OpportunityInstance,
+  WorldEvent,
+} from '@heliora/platform-sdk';
 
 function formatTimeLeft(dateStr: string) {
   const diff = new Date(dateStr).getTime() - Date.now();
@@ -55,36 +60,40 @@ export default function HomePage() {
   const [instances, setInstances] = useState<OpportunityInstance[]>([]);
   const [activity, setActivity] = useState<ActivityLog[]>([]);
   const [worldEvents, setWorldEvents] = useState<WorldEvent[]>([]);
+  const [availableQuests, setAvailableQuests] = useState<OpportunityDefinition[]>([]);
   const [resolving, setResolving] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const now = useNow();
 
   const refreshAll = useCallback(async () => {
     if (!session.characterId || !session.player?.id) return;
     try {
-      const [inst, act, events] = await Promise.all([
+      const [inst, act, events, available] = await Promise.all([
         api.getOpportunityInstances(session.characterId),
         api.getActivity(session.player.id, 1, 12),
         api.getActiveWorldEvents(),
+        api.getAvailableOpportunities(session.characterId),
       ]);
       setInstances(inst);
       setActivity(act.logs);
       setWorldEvents(events);
+      setAvailableQuests(available.filter((opportunity) => opportunity.kind === 'QUEST'));
       await refresh();
     } catch {
       // soft fail
     }
   }, [refresh, session.characterId, session.player?.id]);
 
+  const handleTick = useCallback(() => {
+    void refreshAll();
+  }, [refreshAll]);
+
   useEffect(() => {
     if (!session.characterId) return;
     void refreshAll();
   }, [refreshAll, session.characterId]);
 
-  useEventStream(
-    ['simulation.tick.completed'],
-    () => void refreshAll(),
-    Boolean(session.characterId),
-  );
+  useEventStream(['simulation.tick.completed'], handleTick, Boolean(session.characterId));
 
   async function resolveInstance(instanceId: string) {
     setResolving(instanceId);
@@ -131,6 +140,10 @@ export default function HomePage() {
   const buildingFunctionality = Array.isArray(character.currentBuilding?.functionality)
     ? (character.currentBuilding?.functionality as string[])
     : [];
+  const visibleWorldEvents = worldEvents.filter((event) => {
+    if (!event.endsAt) return true;
+    return new Date(event.endsAt).getTime() > now;
+  });
 
   return (
     <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
@@ -258,10 +271,10 @@ export default function HomePage() {
         </Panel>
       </div>
 
-      {worldEvents.length > 0 && (
-        <Panel title={`Active World Events (${worldEvents.length})`} accent="red">
+      {visibleWorldEvents.length > 0 && (
+        <Panel title={`Active World Events (${visibleWorldEvents.length})`} accent="red">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {worldEvents.map((event) => (
+            {visibleWorldEvents.map((event) => (
               <div
                 key={event.id}
                 className="border border-heliora-red/20 rounded p-3 bg-heliora-red/5"
@@ -273,8 +286,46 @@ export default function HomePage() {
                 <p className="text-heliora-text-dim text-xs">{event.description}</p>
                 <p className="text-heliora-text-dim text-xs mt-1">
                   Scope: {event.scope}
-                  {event.endsAt && ` · ends ${formatTimeAgo(event.endsAt)}`}
+                  {event.endsAt && ` · ends in ${formatTimeLeft(event.endsAt)}`}
                 </p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      {availableQuests.length > 0 && (
+        <Panel title={`Available Quests (${availableQuests.length})`} accent="cyan" glow>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {availableQuests.slice(0, 4).map((quest) => (
+              <div
+                key={quest.id}
+                className="rounded border border-heliora-cyan/30 bg-heliora-cyan/5 p-3"
+              >
+                <div className="mb-2 flex items-center gap-2">
+                  <KindBadge kind="QUEST" />
+                  <span className="text-xs text-heliora-text-dim">{quest.type}</span>
+                </div>
+                <h3 className="text-sm font-bold text-heliora-cyan">{quest.title}</h3>
+                <p className="mt-1 text-xs text-heliora-text-dim">{quest.description}</p>
+                {quest.questData?.stepNumber && quest.questData?.totalSteps && (
+                  <p className="mt-2 text-[11px] font-mono text-heliora-cyan">
+                    Chain progress {quest.questData.stepNumber}/{quest.questData.totalSteps}
+                  </p>
+                )}
+                {quest.questData?.hint && (
+                  <p className="mt-1 text-[11px] text-heliora-text-dim">
+                    Hint: {quest.questData.hint}
+                  </p>
+                )}
+                <div className="mt-3">
+                  <Link
+                    href="/opportunities"
+                    className="inline-flex rounded border border-heliora-cyan/40 px-3 py-1 text-xs font-mono text-heliora-cyan hover:bg-heliora-cyan/10"
+                  >
+                    Open quest board
+                  </Link>
+                </div>
               </div>
             ))}
           </div>
@@ -285,7 +336,7 @@ export default function HomePage() {
         <Panel title={`In Progress (${inProgress.length})`} accent="cyan">
           <div className="space-y-3">
             {inProgress.map((inst) => {
-              const isReady = new Date(inst.completesAt).getTime() <= Date.now();
+              const isReady = new Date(inst.completesAt).getTime() <= now;
               return (
                 <div
                   key={inst.id}

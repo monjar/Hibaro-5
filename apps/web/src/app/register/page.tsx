@@ -8,6 +8,10 @@ import { useSession } from '@/lib/session-context';
 import { Panel } from '@/components/Panel';
 import type { CharacterOptions, StatKey } from '@heliora/platform-sdk';
 
+const USERNAME_PATTERN = /^[a-z0-9_]+$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASSWORD_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/;
+
 const STAT_KEYS: StatKey[] = [
   'strength',
   'agility',
@@ -38,6 +42,7 @@ export default function RegisterPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [attemptedCredentials, setAttemptedCredentials] = useState(false);
 
   useEffect(() => {
     if (session.ready && session.token) router.replace('/');
@@ -64,6 +69,33 @@ export default function RegisterPage() {
   const remaining = budget - allocated;
 
   const selectedBackstory = options?.backstories.find((b) => b.id === backstory);
+  const normalizedUsername = username.trim().toLowerCase();
+  const normalizedEmail = email.trim().toLowerCase();
+  const usernameError =
+    normalizedUsername.length === 0
+      ? 'Username is required.'
+      : normalizedUsername.length < 3
+        ? 'Username must be at least 3 characters.'
+        : normalizedUsername.length > 50
+          ? 'Username must be 50 characters or fewer.'
+          : !USERNAME_PATTERN.test(normalizedUsername)
+            ? 'Username may only contain lowercase letters, numbers, and underscores.'
+            : '';
+  const emailError =
+    normalizedEmail.length === 0
+      ? 'Email is required.'
+      : !EMAIL_PATTERN.test(normalizedEmail)
+        ? 'Enter a valid email address.'
+        : '';
+  const passwordError =
+    password.length === 0
+      ? 'Password is required.'
+      : password.length < 8
+        ? 'Password must be at least 8 characters.'
+        : !PASSWORD_PATTERN.test(password)
+          ? 'Password must include uppercase, lowercase, and a number.'
+          : '';
+  const credentialsValid = !usernameError && !emailError && !passwordError;
 
   function setStat(key: StatKey, value: number) {
     setAllocation((prev) => ({ ...prev, [key]: Math.max(0, Math.min(maxPerKey, value)) }));
@@ -88,8 +120,8 @@ export default function RegisterPage() {
         if ((allocation[k] ?? 0) > 0) cleanedAllocation[k] = allocation[k];
       }
       const res = await api.register({
-        username: username.trim().toLowerCase(),
-        email: email.trim().toLowerCase(),
+        username: normalizedUsername,
+        email: normalizedEmail,
         password,
         characterName: characterName.trim(),
         backstory,
@@ -135,6 +167,11 @@ export default function RegisterPage() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                setAttemptedCredentials(true);
+                if (!credentialsValid) {
+                  return;
+                }
+                setError('');
                 setStep(2);
               }}
               className="space-y-4"
@@ -152,8 +189,15 @@ export default function RegisterPage() {
                   minLength={3}
                   maxLength={50}
                   required
-                  className="mt-1 w-full bg-heliora-dark border border-heliora-border rounded px-3 py-2 text-heliora-cyan text-sm font-mono focus:outline-none focus:border-heliora-cyan"
+                  className={`mt-1 w-full rounded px-3 py-2 text-sm font-mono focus:outline-none ${
+                    (attemptedCredentials || username.length > 0) && usernameError
+                      ? 'border border-heliora-red bg-heliora-red/5 text-heliora-red focus:border-heliora-red'
+                      : 'border border-heliora-border bg-heliora-dark text-heliora-cyan focus:border-heliora-cyan'
+                  }`}
                 />
+                {(attemptedCredentials || username.length > 0) && usernameError && (
+                  <p className="mt-1 text-[11px] text-heliora-red">{usernameError}</p>
+                )}
               </div>
               <div>
                 <label className="text-xs text-heliora-text-dim uppercase tracking-wider">
@@ -164,8 +208,15 @@ export default function RegisterPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="mt-1 w-full bg-heliora-dark border border-heliora-border rounded px-3 py-2 text-heliora-cyan text-sm font-mono focus:outline-none focus:border-heliora-cyan"
+                  className={`mt-1 w-full rounded px-3 py-2 text-sm font-mono focus:outline-none ${
+                    (attemptedCredentials || email.length > 0) && emailError
+                      ? 'border border-heliora-red bg-heliora-red/5 text-heliora-red focus:border-heliora-red'
+                      : 'border border-heliora-border bg-heliora-dark text-heliora-cyan focus:border-heliora-cyan'
+                  }`}
                 />
+                {(attemptedCredentials || email.length > 0) && emailError && (
+                  <p className="mt-1 text-[11px] text-heliora-red">{emailError}</p>
+                )}
               </div>
               <div>
                 <label className="text-xs text-heliora-text-dim uppercase tracking-wider">
@@ -177,15 +228,28 @@ export default function RegisterPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   minLength={8}
                   required
-                  className="mt-1 w-full bg-heliora-dark border border-heliora-border rounded px-3 py-2 text-heliora-cyan text-sm font-mono focus:outline-none focus:border-heliora-cyan"
+                  className={`mt-1 w-full rounded px-3 py-2 text-sm font-mono focus:outline-none ${
+                    (attemptedCredentials || password.length > 0) && passwordError
+                      ? 'border border-heliora-red bg-heliora-red/5 text-heliora-red focus:border-heliora-red'
+                      : 'border border-heliora-border bg-heliora-dark text-heliora-cyan focus:border-heliora-cyan'
+                  }`}
                 />
                 <p className="mt-1 text-[10px] text-heliora-text-dim">
                   Minimum 8 chars, must include uppercase, lowercase, and a number.
                 </p>
+                {(attemptedCredentials || password.length > 0) && passwordError && (
+                  <p className="mt-1 text-[11px] text-heliora-red">{passwordError}</p>
+                )}
               </div>
+              {!credentialsValid && attemptedCredentials && (
+                <p className="rounded border border-heliora-red/30 bg-heliora-red/10 px-3 py-2 text-xs text-heliora-red">
+                  Fix the credential errors above before continuing.
+                </p>
+              )}
               <button
                 type="submit"
-                className="w-full px-4 py-2 bg-heliora-orange/20 border border-heliora-orange/50 rounded text-heliora-orange text-sm font-mono font-bold hover:bg-heliora-orange/30 tracking-wider"
+                disabled={!credentialsValid}
+                className="w-full rounded border border-heliora-orange/50 bg-heliora-orange/20 px-4 py-2 text-sm font-mono font-bold tracking-wider text-heliora-orange hover:bg-heliora-orange/30 disabled:opacity-40"
               >
                 NEXT — CHOOSE BACKSTORY
               </button>

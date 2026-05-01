@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { OpportunityDefinition, AdminOpportunityInput } from '@heliora/platform-sdk';
+import type {
+  AdminItemDefinition, 
+  AdminOpportunityInput, 
+  OpportunityDefinition, 
+} from '@heliora/platform-sdk';
 import { adminApi } from '../../lib/api';
 import {
   AdminShell,
@@ -42,17 +46,29 @@ const empty: AdminOpportunityInput = {
   risks: [],
 };
 
+type ItemReward = Record<string, unknown> & {
+  type: 'ITEM';
+  itemDefinitionId: string;
+};
+
 export default function AdminOpportunitiesPage() {
   const [list, setList] = useState<OpportunityDefinition[]>([]);
+  const [itemDefinitions, setItemDefinitions] = useState<AdminItemDefinition[]>([]);
   const [editing, setEditing] = useState<AdminOpportunityInput | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [selectedRewardItemId, setSelectedRewardItemId] = useState('');
 
   async function load() {
     try {
-      const result = await adminApi.getOpportunities();
+      const [result, items] = await Promise.all([
+        adminApi.getOpportunities(),
+        adminApi.getItemDefinitions(),
+      ]);
       setList(result);
+      setItemDefinitions(items);
+      setSelectedRewardItemId((current) => current || items[0]?.id || '');
     } catch (err) {
       setMessage(`- ${(err as Error).message}`);
     }
@@ -65,6 +81,7 @@ export default function AdminOpportunitiesPage() {
   function openNew() {
     setEditingId(null);
     setEditing({ ...empty });
+    setSelectedRewardItemId((current) => current || itemDefinitions[0]?.id || '');
   }
 
   function openEdit(opp: OpportunityDefinition) {
@@ -81,6 +98,12 @@ export default function AdminOpportunitiesPage() {
       risks: opp.risks,
       repeatability: opp.repeatability,
     });
+    const existingItemReward = ((opp.rewards as Array<Record<string, unknown>>) ?? []).find(
+      (reward) => reward.type === 'ITEM' && typeof reward.itemDefinitionId === 'string',
+    );
+    setSelectedRewardItemId(
+      (existingItemReward?.itemDefinitionId as string | undefined) ?? itemDefinitions[0]?.id ?? '',
+    );
   }
 
   async function save() {
@@ -126,6 +149,34 @@ export default function AdminOpportunitiesPage() {
     if (!editing) return;
     setEditing({ ...editing, [key]: value });
   }
+
+  function appendSelectedItemReward() {
+    if (!editing || !selectedRewardItemId) return;
+    const rewards = Array.isArray(editing.rewards) ? editing.rewards : [];
+    update('rewards', [...rewards, { type: 'ITEM', itemDefinitionId: selectedRewardItemId }]);
+  }
+
+  function removeItemReward(rewardIndex: number) {
+    if (!editing || !Array.isArray(editing.rewards)) return;
+    update(
+      'rewards',
+      editing.rewards.filter((_, index) => index !== rewardIndex),
+    );
+  }
+
+  const itemRewardEntries = Array.isArray(editing?.rewards)
+    ? editing.rewards
+        .map((reward, index) => ({ reward, index }))
+        .filter(
+          (entry): entry is { reward: ItemReward; index: number } => {
+            if (typeof entry.reward !== 'object' || entry.reward === null) {
+              return false;
+            }
+            const reward = entry.reward as Record<string, unknown>;
+            return reward.type === 'ITEM' && typeof reward.itemDefinitionId === 'string';
+          },
+        )
+    : [];
 
   return (
     <AdminShell
@@ -196,6 +247,67 @@ export default function AdminOpportunitiesPage() {
               onChange={(v) => update('rewards', (v as unknown[]) ?? [])}
               example='[{"type":"CREDITS","value":100}]'
             />
+            <div className="md:col-span-2 rounded border border-heliora-yellow/30 bg-heliora-yellow/5 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                <div className="flex-1">
+                  <label className="text-xs uppercase tracking-wider text-heliora-text-dim">
+                    Quick item reward selector
+                  </label>
+                  <select
+                    className="mt-1 w-full rounded border border-heliora-border bg-heliora-dark px-3 py-2 text-sm font-mono text-heliora-cyan"
+                    value={selectedRewardItemId}
+                    onChange={(event) => setSelectedRewardItemId(event.target.value)}
+                    disabled={itemDefinitions.length === 0}
+                  >
+                    {itemDefinitions.length === 0 ? (
+                      <option value="">No item definitions available</option>
+                    ) : (
+                      itemDefinitions.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} · {item.category}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={appendSelectedItemReward}
+                  disabled={!selectedRewardItemId}
+                  className="rounded border border-heliora-yellow/50 bg-heliora-yellow/10 px-4 py-2 text-sm font-bold text-heliora-yellow hover:bg-heliora-yellow/20 disabled:opacity-30"
+                >
+                  ADD ITEM REWARD
+                </button>
+              </div>
+              <div className="mt-3 space-y-2">
+                {itemRewardEntries.length === 0 ? (
+                  <p className="text-xs text-heliora-text-dim">
+                    No item rewards configured yet. Adding one here updates the rewards JSON above.
+                  </p>
+                ) : (
+                  itemRewardEntries.map(({ reward, index }) => {
+                    const item = itemDefinitions.find((entry) => entry.id === reward.itemDefinitionId);
+                    return (
+                      <div
+                        key={`${reward.itemDefinitionId}-${index}`}
+                        className="flex items-center justify-between rounded border border-heliora-border bg-heliora-dark px-3 py-2 text-xs"
+                      >
+                        <span className="font-mono text-heliora-cyan">
+                          {item?.name ?? reward.itemDefinitionId}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeItemReward(index)}
+                          className="rounded border border-heliora-red/40 px-2 py-1 text-[10px] text-heliora-red hover:bg-heliora-red/10"
+                        >
+                          REMOVE
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
             <JsonField
               label="Risks (JSON array)"
               value={editing.risks ?? []}

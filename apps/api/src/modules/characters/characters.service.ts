@@ -272,6 +272,7 @@ export class CharactersService {
         credits: character.credits - cost,
         energy: newEnergy,
         health: newHealth,
+        ...(newEnergy > character.energy ? { lastEnergyDecayAt: new Date() } : {}),
         wantedLevel: newWanted,
       },
       include: { currentPlanet: true, currentDistrict: true, currentBuilding: true },
@@ -352,7 +353,15 @@ export class CharactersService {
     }
 
     await this.prisma.$transaction([
-      this.prisma.character.update({ where: { id }, data: updates }),
+      this.prisma.character.update({
+        where: { id },
+        data: {
+          ...updates,
+          ...(typeof updates.energy === 'number' && updates.energy > character.energy
+            ? { lastEnergyDecayAt: new Date() }
+            : {}),
+        },
+      }),
       this.prisma.itemInstance.delete({ where: { id: item.id } }),
       ...(character.playerId
         ? [

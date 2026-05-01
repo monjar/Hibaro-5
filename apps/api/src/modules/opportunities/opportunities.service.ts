@@ -54,6 +54,7 @@ export class OpportunitiesService {
 
   async createDefinition(data: AdminOpportunityInput) {
     this.validateAdminInput(data);
+    await this.assertValidRewardReferences(data.rewards ?? []);
     return this.prisma.opportunityDefinition.create({
       data: {
         title: data.title,
@@ -74,6 +75,9 @@ export class OpportunitiesService {
     await this.findOne(id);
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('No fields to update');
+    }
+    if (data.rewards !== undefined) {
+      await this.assertValidRewardReferences(data.rewards ?? []);
     }
     return this.prisma.opportunityDefinition.update({
       where: { id },
@@ -124,6 +128,32 @@ export class OpportunitiesService {
     }
     if (input.durationMinutes !== undefined && input.durationMinutes < 1) {
       throw new BadRequestException('durationMinutes must be at least 1');
+    }
+  }
+
+  private async assertValidRewardReferences(rewards: unknown[]) {
+    const itemDefinitionIds = [...new Set(
+      rewards
+        .filter((reward): reward is { type?: unknown; itemDefinitionId?: unknown } =>
+          typeof reward === 'object' && reward !== null,
+        )
+        .filter((reward) => reward.type === 'ITEM' && typeof reward.itemDefinitionId === 'string')
+        .map((reward) => reward.itemDefinitionId as string),
+    )];
+
+    if (itemDefinitionIds.length === 0) {
+      return;
+    }
+
+    const existingDefinitions = await this.prisma.itemDefinition.findMany({
+      where: { id: { in: itemDefinitionIds } },
+      select: { id: true },
+    });
+    const existingIds = new Set(existingDefinitions.map((item) => item.id));
+    const missingIds = itemDefinitionIds.filter((id) => !existingIds.has(id));
+
+    if (missingIds.length > 0) {
+      throw new BadRequestException(`Unknown item reward definitions: ${missingIds.join(', ')}`);
     }
   }
 
@@ -320,14 +350,36 @@ export class OpportunitiesService {
     if (success) {
       for (const reward of rewards) {
         if (reward.type === 'CREDITS') {
-          characterUpdates.credits = (character.credits || 0) + reward.value;
+          const currentCredits = characterUpdates.credits ?? character.credits ?? 0;
+          characterUpdates.credits = currentCredits + (reward.value ?? 0);
           appliedRewards.push(reward);
         } else if (reward.type === 'STAT_XP') {
-          const currentVal = character[reward.key] || 0;
+          const currentVal = characterUpdates[reward.key] ?? character[reward.key] ?? 0;
           if (Math.random() < STAT_XP_GAIN_PROBABILITY) {
             characterUpdates[reward.key] = currentVal + 1;
           }
           appliedRewards.push(reward);
+        } else if (reward.type === 'ITEM' && typeof reward.itemDefinitionId === 'string') {
+          const grantedItem = await this.prisma.itemDefinition.findUnique({
+            where: { id: reward.itemDefinitionId },
+            select: { id: true, name: true },
+          });
+          if (!grantedItem) {
+            continue;
+          }
+          const itemInstance = await this.prisma.itemInstance.create({
+            data: {
+              itemDefinitionId: grantedItem.id,
+              ownerType: 'CHARACTER',
+              ownerId: character.id,
+            },
+          });
+          appliedRewards.push({
+            ...reward,
+            itemDefinitionId: grantedItem.id,
+            itemInstanceId: itemInstance.id,
+            itemName: grantedItem.name,
+          });
         } else if (reward.type === 'FACTION_REPUTATION') {
           await this.upsertRelationship(
             'CHARACTER',
@@ -371,13 +423,15 @@ export class OpportunitiesService {
           const consequences = risk.consequences || [];
           for (const consequence of consequences) {
             if (consequence.type === 'MODIFY_WANTED_LEVEL') {
+              const currentWantedLevel = characterUpdates.wantedLevel ?? character.wantedLevel ?? 0;
               characterUpdates.wantedLevel = Math.max(
                 0,
-                (character.wantedLevel || 0) + consequence.value,
+                currentWantedLevel + consequence.value,
               );
               appliedRisks.push(consequence);
             } else if (consequence.type === 'MODIFY_STAT' && consequence.key === 'health') {
-              characterUpdates.health = Math.max(0, (character.health || 100) + consequence.value);
+              const currentHealth = characterUpdates.health ?? character.health ?? 100;
+              characterUpdates.health = Math.max(0, currentHealth + consequence.value);
               appliedRisks.push(consequence);
             }
           }

@@ -43,6 +43,7 @@ export class JobsService {
       if (existing.status === 'ACTIVE') {
         throw new BadRequestException('Already employed at this job');
       }
+      await this.assertNoOtherActiveEmployment(characterId, opportunityId);
       const reactivated = await this.prisma.jobEmployment.update({
         where: { id: existing.id },
         data: {
@@ -56,6 +57,8 @@ export class JobsService {
       await this.logActivity(characterId, playerId, 'JOB_HIRED', `Re-hired: ${opportunity.title}`);
       return reactivated;
     }
+
+    await this.assertNoOtherActiveEmployment(characterId);
 
     const employment = await this.prisma.jobEmployment.create({
       data: {
@@ -206,6 +209,23 @@ export class JobsService {
     if (!character) throw new NotFoundException(`Character ${characterId} not found`);
     if (character.playerId !== playerId) {
       throw new ForbiddenException('You can only manage jobs for your own character');
+    }
+  }
+
+  private async assertNoOtherActiveEmployment(characterId: string, ignoredOpportunityId?: string) {
+    const activeEmployment = await this.prisma.jobEmployment.findFirst({
+      where: {
+        characterId,
+        status: 'ACTIVE',
+        ...(ignoredOpportunityId ? { opportunityId: { not: ignoredOpportunityId } } : {}),
+      },
+      include: { opportunity: { select: { title: true } } },
+    });
+
+    if (activeEmployment) {
+      throw new BadRequestException(
+        `Only one active job is allowed. Quit ${activeEmployment.opportunity.title} before taking another job.`,
+      );
     }
   }
 

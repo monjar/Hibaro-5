@@ -237,6 +237,7 @@ model Character {
   maxHealth         Int           @default(100)
   energy            Int           @default(100)
   maxEnergy         Int           @default(100)
+  lastEnergyDecayAt DateTime      @default(now())
   wantedLevel       Int           @default(0)
   strength          Int           @default(5)
   agility           Int           @default(5)

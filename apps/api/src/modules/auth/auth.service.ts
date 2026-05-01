@@ -105,6 +105,7 @@ export class AuthService {
           maxHealth: 100,
           energy: 100,
           maxEnergy: 100,
+          lastEnergyDecayAt: new Date(),
           wantedLevel: 0,
           strength: starter.stats.strength,
           agility: starter.stats.agility,

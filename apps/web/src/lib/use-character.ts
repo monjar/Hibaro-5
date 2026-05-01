@@ -85,3 +85,14 @@ export function useAutoRefresh(refresh: () => void, intervalMs = 15_000) {
     return () => clearInterval(id);
   }, [refresh, intervalMs]);
 }
+
+export function useNow(intervalMs = 1_000) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+
+  return now;
+}

@@ -8,6 +8,9 @@ import { JobsService } from '../jobs/jobs.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { clampWorldMetric, deriveCorporationStatus } from './simulation.utils';
 
+const ENERGY_DECAY_PER_HOUR = 3;
+const ENERGY_DECAY_INTERVAL_MS = 60 * 60 * 1000;
+
 @Injectable()
 export class SimulationService {
   constructor(
@@ -25,6 +28,7 @@ export class SimulationService {
     const economy = await this.advanceEconomy();
     const corporations = await this.advanceCorporations();
     const districtControl = await this.buildDistrictControlState();
+    const energyDecay = await this.applyEnergyDecay(now);
     const npcActivity = await this.processNpcActivity(now);
     const jobShifts = await this.jobsService.processStrikes(now);
 
@@ -62,6 +66,15 @@ export class SimulationService {
         notes: ['Computed district travel surcharges and control scores'],
       },
       {
+        step: 'energy_decay' as const,
+        processed: energyDecay.processed,
+        changes: energyDecay.changed,
+        notes: [
+          `${energyDecay.changed} character(s) decayed`,
+          `${energyDecay.totalEnergyLost} total energy lost`,
+        ],
+      },
+      {
         step: 'npc_activity' as const,
         processed: npcActivity.actions.length,
         changes: npcActivity.actions.length,
@@ -86,6 +99,7 @@ export class SimulationService {
       { type: 'world-events', activated: worldEvents.activated, resolved: worldEvents.resolved },
       { type: 'economy', updates: economy.updated },
       { type: 'corporations', updates: corporations.updated },
+      { type: 'energy-decay', changed: energyDecay.changed, totalEnergyLost: energyDecay.totalEnergyLost },
       ...npcActivity.actions,
     ];
 
@@ -98,6 +112,7 @@ export class SimulationService {
         marketUpdates: economy.updated,
         corporationUpdates: corporations.updated,
         districtControlUpdates: districtControl.length,
+        energyDecayUpdates: energyDecay.changed,
         npcActions: npcActivity.actions.length,
       },
       stepSummaries,
@@ -152,7 +167,10 @@ export class SimulationService {
         this.prisma.faction.findMany({ orderBy: { influence: 'desc' } }),
         this.prisma.corporation.findMany({ orderBy: { name: 'asc' } }),
         this.prisma.worldEvent.findMany({
-          where: { status: 'ACTIVE' },
+          where: {
+            status: 'ACTIVE',
+            OR: [{ endsAt: null }, { endsAt: { gte: new Date() } }],
+          },
           orderBy: { startsAt: 'desc' },
         }),
         this.prisma.district.findMany({
@@ -501,6 +519,47 @@ export class SimulationService {
       lawLevel: district.lawLevel,
       economyLevel: district.economyLevel,
     }));
+  }
+
+  private async applyEnergyDecay(now: Date) {
+    const threshold = new Date(now.getTime() - ENERGY_DECAY_INTERVAL_MS);
+    const characters = await this.prisma.character.findMany({
+      where: {
+        type: 'PLAYER',
+        energy: { gt: 0 },
+        lastEnergyDecayAt: { lte: threshold },
+      },
+      select: { id: true, energy: true, maxEnergy: true, lastEnergyDecayAt: true },
+    });
+
+    let changed = 0;
+    let totalEnergyLost = 0;
+
+    for (const character of characters) {
+      const elapsedMs = now.getTime() - character.lastEnergyDecayAt.getTime();
+      const elapsedHours = Math.floor(elapsedMs / ENERGY_DECAY_INTERVAL_MS);
+      if (elapsedHours <= 0) {
+        continue;
+      }
+
+      const energyLoss = Math.min(character.energy, elapsedHours * ENERGY_DECAY_PER_HOUR);
+      const nextDecayAt = new Date(
+        character.lastEnergyDecayAt.getTime() + elapsedHours * ENERGY_DECAY_INTERVAL_MS,
+      );
+
+      await this.prisma.character.update({
+        where: { id: character.id },
+        data: {
+          energy: Math.max(0, character.energy - energyLoss),
+          lastEnergyDecayAt: nextDecayAt,
+        },
+      });
+
+      changed += 1;
+      totalEnergyLost += energyLoss;
+    }
+
+    return { processed: characters.length, changed, totalEnergyLost };
   }
 
   private async processNpcActivity(now: Date) {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useAuthGuard } from '@/lib/session-context';
-import { useCharacter } from '@/lib/use-character';
+import { useCharacter, useNow } from '@/lib/use-character';
 import { useEventStream } from '@/lib/use-event-stream';
 import { Panel } from '@/components/Panel';
 import { KindBadge, StatusBadge } from '@/components/KindBadge';
@@ -26,6 +26,7 @@ export default function OpportunitiesPage() {
   const [resolving, setResolving] = useState<string | null>(null);
   const [hiringFor, setHiringFor] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const now = useNow();
 
   const refresh = useCallback(async () => {
     if (!session.characterId) return;
@@ -46,11 +47,10 @@ export default function OpportunitiesPage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-  useEventStream(
-    ['simulation.tick.completed'],
-    () => void refresh(),
-    Boolean(session.characterId),
-  );
+  const handleTick = useCallback(() => {
+    void refresh();
+  }, [refresh]);
+  useEventStream(['simulation.tick.completed'], handleTick, Boolean(session.characterId));
 
   async function accept(opp: OpportunityDefinition) {
     if (!session.characterId) return;
@@ -129,13 +129,16 @@ export default function OpportunitiesPage() {
   const hasActiveActivity = inProgress.length > 0;
   const activeJobs = employments.filter((e) => e.status === 'ACTIVE');
   const employedOpportunityIds = new Set(activeJobs.map((j) => j.opportunityId));
+  const availableQuests = available.filter((opportunity) => opportunity.kind === 'QUEST');
+  const availableJobs = available.filter((opportunity) => opportunity.kind === 'JOB');
+  const availableGigs = available.filter((opportunity) => opportunity.kind === 'GIG');
 
   function shiftStatus(emp: JobEmployment): {
     label: string;
     tone: 'green' | 'yellow' | 'red';
   } {
     const elapsedHours =
-      (Date.now() - new Date(emp.lastShiftAt).getTime()) / (1000 * 60 * 60);
+      (now - new Date(emp.lastShiftAt).getTime()) / (1000 * 60 * 60);
     const overdue = elapsedHours - emp.cadenceHours;
     if (overdue > 0) {
       return { label: `OVERDUE ${overdue.toFixed(1)}h`, tone: 'red' };
@@ -144,6 +147,155 @@ export default function OpportunitiesPage() {
       return { label: `DUE in ${(-overdue).toFixed(1)}h`, tone: 'yellow' };
     }
     return { label: `next shift ${Math.max(0, -overdue).toFixed(0)}h`, tone: 'green' };
+  }
+
+  function renderOpportunityCard(
+    opp: OpportunityDefinition,
+    accent: 'cyan' | 'yellow' | 'orange',
+  ) {
+    const requirements = (opp.requirements as RequirementEntry[]) ?? [];
+    const questData = opp.questData;
+    const requirementsMet = character
+      ? requirements.every((requirement) => {
+          if (requirement.type === 'CREDITS_MIN') return character.credits >= requirement.value;
+          if (requirement.type === 'STAT_MIN' && requirement.key) {
+            const stat =
+              (character[requirement.key as keyof typeof character] as number | undefined) ?? 0;
+            return stat >= requirement.value;
+          }
+          return true;
+        })
+      : true;
+    const cannotTakeAnotherJob =
+      opp.kind === 'JOB' && !employedOpportunityIds.has(opp.id) && activeJobs.length > 0;
+    const hoverClass =
+      accent === 'cyan'
+        ? 'hover:border-heliora-cyan/40'
+        : accent === 'yellow'
+          ? 'hover:border-heliora-yellow/40'
+          : 'hover:border-heliora-orange/40';
+
+    return (
+      <div
+        key={opp.id}
+        className={`rounded border p-3 transition-colors ${
+          requirementsMet
+            ? `border-heliora-border bg-heliora-dark ${hoverClass}`
+            : 'border-heliora-border/40 bg-heliora-dark/50 opacity-70'
+        }`}
+      >
+        <div className="mb-1 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <KindBadge kind={opp.kind} />
+            <span className="text-xs text-heliora-text-dim">{opp.type}</span>
+          </div>
+          <span className="text-xs text-heliora-text-dim">⚡ Diff {opp.difficulty}</span>
+        </div>
+        <h3 className="mb-1 text-sm font-bold text-heliora-text">{opp.title}</h3>
+        <p className="mb-2 line-clamp-3 text-xs text-heliora-text-dim">{opp.description}</p>
+        {opp.kind === 'QUEST' && questData?.stepNumber && questData?.totalSteps && (
+          <div className="mb-2 text-[11px] font-mono text-heliora-cyan">
+            Chain progress {questData.stepNumber}/{questData.totalSteps}
+          </div>
+        )}
+        {opp.kind === 'QUEST' && questData?.hint && (
+          <div className="mb-2 text-[11px] text-heliora-text-dim">Hint: {questData.hint}</div>
+        )}
+        <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+          <span className="text-heliora-text-dim">⏱ {opp.durationMinutes ?? '?'}m</span>
+          {(opp.rewards as RewardEntry[]).map((reward, index) => {
+            if (reward.type === 'CREDITS') {
+              return (
+                <span key={`${opp.id}-reward-${index}`} className="font-bold text-heliora-green">
+                  +${reward.value}
+                </span>
+              );
+            }
+            if (reward.type === 'FACTION_REPUTATION') {
+              return (
+                <span key={`${opp.id}-reward-${index}`} className="text-heliora-yellow">
+                  +{reward.value} REP
+                </span>
+              );
+            }
+            if (reward.type === 'CORPORATION_REPUTATION') {
+              return (
+                <span key={`${opp.id}-reward-${index}`} className="text-heliora-cyan">
+                  +{reward.value} CORP
+                </span>
+              );
+            }
+            if (reward.type === 'STAT_XP') {
+              return (
+                <span key={`${opp.id}-reward-${index}`} className="text-heliora-orange">
+                  +{reward.value} XP {reward.key}
+                </span>
+              );
+            }
+            if (reward.type === 'ITEM') {
+              return (
+                <span key={`${opp.id}-reward-${index}`} className="text-heliora-cyan">
+                  Item reward
+                </span>
+              );
+            }
+            return null;
+          })}
+        </div>
+        {requirements.length > 0 && (
+          <div
+            className={`mb-2 border-t pt-2 text-xs ${
+              requirementsMet
+                ? 'border-heliora-border text-heliora-yellow'
+                : 'border-heliora-red/30 text-heliora-red'
+            }`}
+          >
+            Req:{' '}
+            {requirements
+              .map((requirement) => `${requirement.key ?? requirement.type} ≥ ${requirement.value}`)
+              .join(', ')}
+          </div>
+        )}
+        {opp.kind === 'JOB' && !employedOpportunityIds.has(opp.id) ? (
+          <button
+            onClick={() => void hire(opp)}
+            disabled={hiringFor === opp.id || !requirementsMet || cannotTakeAnotherJob}
+            className="w-full rounded border border-heliora-yellow/50 bg-heliora-yellow/20 px-3 py-1.5 text-xs font-mono font-bold text-heliora-yellow transition-colors hover:bg-heliora-yellow/30 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            {hiringFor === opp.id
+              ? 'HIRING…'
+              : !requirementsMet
+                ? 'LOCKED'
+                : cannotTakeAnotherJob
+                  ? 'JOB SLOT FULL'
+                  : 'GET HIRED'}
+          </button>
+        ) : (
+          <button
+            onClick={() => void accept(opp)}
+            disabled={accepting === opp.id || !requirementsMet || hasActiveActivity}
+            title={hasActiveActivity ? 'Finish your current activity first' : undefined}
+            className={`w-full rounded border px-3 py-1.5 text-xs font-mono font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+              accent === 'cyan'
+                ? 'border-heliora-cyan/50 bg-heliora-cyan/20 text-heliora-cyan hover:bg-heliora-cyan/30'
+                : accent === 'yellow'
+                  ? 'border-heliora-yellow/50 bg-heliora-yellow/20 text-heliora-yellow hover:bg-heliora-yellow/30'
+                  : 'border-heliora-orange/50 bg-heliora-orange/20 text-heliora-orange hover:bg-heliora-orange/30'
+            }`}
+          >
+            {accepting === opp.id
+              ? 'ACCEPTING…'
+              : !requirementsMet
+                ? 'LOCKED'
+                : hasActiveActivity
+                  ? 'BUSY'
+                  : opp.kind === 'JOB'
+                    ? 'WORK SHIFT'
+                    : 'ACCEPT'}
+          </button>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -166,17 +318,16 @@ export default function OpportunitiesPage() {
         <Panel title={`Active (${inProgress.length})`} accent="cyan">
           <div className="space-y-2">
             {inProgress.map((inst) => {
-              const isReady = new Date(inst.completesAt).getTime() <= Date.now();
+              const completesAtMs = new Date(inst.completesAt).getTime();
+              const startedAtMs = new Date(inst.startedAt).getTime();
+              const isReady = completesAtMs <= now;
               const remaining = Math.max(
                 0,
-                Math.floor((new Date(inst.completesAt).getTime() - Date.now()) / 1000),
+                Math.floor((completesAtMs - now) / 1000),
               );
               const total = Math.max(
                 1,
-                Math.floor(
-                  (new Date(inst.completesAt).getTime() - new Date(inst.startedAt).getTime()) /
-                    1000,
-                ),
+                Math.floor((completesAtMs - startedAtMs) / 1000),
               );
               const pct = Math.min(100, Math.round(((total - remaining) / total) * 100));
               return (
@@ -267,130 +418,56 @@ export default function OpportunitiesPage() {
         </Panel>
       )}
 
-      <Panel title={`Available (${available.length})`} accent="orange">
-        {available.length === 0 ? (
+      {available.length === 0 ? (
+        <Panel title="Available Opportunities" accent="orange">
           <p className="text-heliora-text-dim text-sm py-4 text-center">
             No opportunities available right now. Try again after the next world tick.
           </p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {available.map((opp) => {
-              const requirements = (opp.requirements as RequirementEntry[]) ?? [];
-              const questData = opp.questData;
-              const requirementsMet = character
-                ? requirements.every((r) => {
-                    if (r.type === 'CREDITS_MIN') return character.credits >= r.value;
-                    if (r.type === 'STAT_MIN' && r.key) {
-                      const stat =
-                        (character[r.key as keyof typeof character] as number | undefined) ?? 0;
-                      return stat >= r.value;
-                    }
-                    return true;
-                  })
-                : true;
-              return (
-                <div
-                  key={opp.id}
-                  className={`border rounded p-3 transition-colors ${
-                    requirementsMet
-                      ? 'border-heliora-border bg-heliora-dark hover:border-heliora-orange/30'
-                      : 'border-heliora-border/40 bg-heliora-dark/50 opacity-70'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <KindBadge kind={opp.kind} />
-                      <span className="text-heliora-text-dim text-xs">{opp.type}</span>
-                    </div>
-                    <span className="text-xs text-heliora-text-dim">⚡ Diff {opp.difficulty}</span>
-                  </div>
-                  <h3 className="text-heliora-text font-bold text-sm mb-1">{opp.title}</h3>
-                  <p className="text-heliora-text-dim text-xs mb-2 line-clamp-3">
-                    {opp.description}
-                  </p>
-                  {opp.kind === 'QUEST' && questData?.stepNumber && questData?.totalSteps && (
-                    <div className="mb-2 text-[11px] text-heliora-cyan font-mono">
-                      Chain progress {questData.stepNumber}/{questData.totalSteps}
-                    </div>
-                  )}
-                  {opp.kind === 'QUEST' && questData?.hint && (
-                    <div className="mb-2 text-[11px] text-heliora-text-dim">
-                      Hint: {questData.hint}
-                    </div>
-                  )}
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs mb-2">
-                    <span className="text-heliora-text-dim">⏱ {opp.durationMinutes ?? '?'}m</span>
-                    {(opp.rewards as RewardEntry[]).map((r, i) => {
-                      if (r.type === 'CREDITS')
-                        return (
-                          <span key={i} className="text-heliora-green font-bold">
-                            +${r.value}
-                          </span>
-                        );
-                      if (r.type === 'FACTION_REPUTATION')
-                        return (
-                          <span key={i} className="text-heliora-yellow">
-                            +{r.value} REP
-                          </span>
-                        );
-                      if (r.type === 'CORPORATION_REPUTATION')
-                        return (
-                          <span key={i} className="text-heliora-cyan">
-                            +{r.value} CORP
-                          </span>
-                        );
-                      if (r.type === 'STAT_XP')
-                        return (
-                          <span key={i} className="text-heliora-orange">
-                            +{r.value} XP {r.key}
-                          </span>
-                        );
-                      return null;
-                    })}
-                  </div>
-                  {requirements.length > 0 && (
-                    <div
-                      className={`text-xs mb-2 border-t pt-2 ${
-                        requirementsMet
-                          ? 'text-heliora-yellow border-heliora-border'
-                          : 'text-heliora-red border-heliora-red/30'
-                      }`}
-                    >
-                      Req: {requirements.map((r) => `${r.key ?? r.type} ≥ ${r.value}`).join(', ')}
-                    </div>
-                  )}
-                  {opp.kind === 'JOB' && !employedOpportunityIds.has(opp.id) ? (
-                    <button
-                      onClick={() => void hire(opp)}
-                      disabled={hiringFor === opp.id || !requirementsMet}
-                      className="w-full px-3 py-1.5 bg-heliora-yellow/20 border border-heliora-yellow/50 rounded text-heliora-yellow text-xs font-mono font-bold hover:bg-heliora-yellow/30 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      {hiringFor === opp.id ? 'HIRING…' : !requirementsMet ? 'LOCKED' : 'GET HIRED'}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => void accept(opp)}
-                      disabled={accepting === opp.id || !requirementsMet || hasActiveActivity}
-                      title={hasActiveActivity ? 'Finish your current activity first' : undefined}
-                      className="w-full px-3 py-1.5 bg-heliora-orange/20 border border-heliora-orange/50 rounded text-heliora-orange text-xs font-mono font-bold hover:bg-heliora-orange/30 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      {accepting === opp.id
-                        ? 'ACCEPTING…'
-                        : !requirementsMet
-                          ? 'LOCKED'
-                          : hasActiveActivity
-                            ? 'BUSY'
-                            : opp.kind === 'JOB'
-                              ? 'WORK SHIFT'
-                              : 'ACCEPT'}
-                    </button>
-                  )}
+        </Panel>
+      ) : (
+        <>
+          <Panel title={`Quest Board (${availableQuests.length})`} accent="cyan" glow>
+            {availableQuests.length === 0 ? (
+              <p className="py-4 text-center text-sm text-heliora-text-dim">
+                No quests are currently unlocked for this operator.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {availableQuests.map((opp) => renderOpportunityCard(opp, 'cyan'))}
+              </div>
+            )}
+          </Panel>
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Panel title={`Gig Board (${availableGigs.length})`} accent="orange">
+              {availableGigs.length === 0 ? (
+                <p className="py-4 text-center text-sm text-heliora-text-dim">
+                  No gigs are on the wire right now.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {availableGigs.map((opp) => renderOpportunityCard(opp, 'orange'))}
                 </div>
-              );
-            })}
+              )}
+            </Panel>
+
+            <Panel title={`Job Board (${availableJobs.length})`} accent="yellow">
+              <p className="mb-3 text-[11px] text-heliora-text-dim">
+                Only one active job may be held at a time.
+              </p>
+              {availableJobs.length === 0 ? (
+                <p className="py-4 text-center text-sm text-heliora-text-dim">
+                  No job openings are currently posted.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {availableJobs.map((opp) => renderOpportunityCard(opp, 'yellow'))}
+                </div>
+              )}
+            </Panel>
           </div>
-        )}
-      </Panel>
+        </>
+      )}
 
       {completed.length > 0 && (
         <Panel title={`History (${completed.length})`} accent="green">
