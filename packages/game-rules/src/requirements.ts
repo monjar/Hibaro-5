@@ -13,6 +13,13 @@ export function checkRequirement(
       return statValue >= requirement.value;
     }
 
+    case 'STAT_MAX': {
+      if (!requirement.key || requirement.value === undefined) return false;
+      const statValue = (character as any)[requirement.key];
+      if (typeof statValue !== 'number') return false;
+      return statValue <= requirement.value;
+    }
+
     case 'CREDITS_MIN': {
       if (requirement.value === undefined) return false;
       return character.credits >= requirement.value;
@@ -24,10 +31,40 @@ export function checkRequirement(
       return rep >= requirement.value;
     }
 
+    case 'FACTION_REPUTATION_MAX': {
+      if (!requirement.id || requirement.value === undefined) return false;
+      const rep = context.factionReputations?.[requirement.id] ?? 0;
+      return rep <= requirement.value;
+    }
+
     case 'CORPORATION_REPUTATION_MIN': {
       if (!requirement.id || requirement.value === undefined) return false;
       const rep = context.corporationReputations?.[requirement.id] ?? 0;
       return rep >= requirement.value;
+    }
+
+    case 'CORPORATION_REPUTATION_MAX': {
+      if (!requirement.id || requirement.value === undefined) return false;
+      const rep = context.corporationReputations?.[requirement.id] ?? 0;
+      return rep <= requirement.value;
+    }
+
+    case 'RELATIONSHIP_MIN': {
+      if (!requirement.id || requirement.value === undefined || !requirement.scope) return false;
+      const rep =
+        requirement.scope === 'FACTION'
+          ? (context.factionReputations?.[requirement.id] ?? 0)
+          : (context.corporationReputations?.[requirement.id] ?? 0);
+      return rep >= requirement.value;
+    }
+
+    case 'RELATIONSHIP_MAX': {
+      if (!requirement.id || requirement.value === undefined || !requirement.scope) return false;
+      const rep =
+        requirement.scope === 'FACTION'
+          ? (context.factionReputations?.[requirement.id] ?? 0)
+          : (context.corporationReputations?.[requirement.id] ?? 0);
+      return rep <= requirement.value;
     }
 
     case 'ITEM_REQUIRED': {

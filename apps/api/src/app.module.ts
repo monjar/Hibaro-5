@@ -12,6 +12,10 @@ import { SimulationModule } from './modules/simulation/simulation.module';
 import { WorldEventsModule } from './modules/world-events/world-events.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { StocksModule } from './modules/stocks/stocks.module';
+import { ShopsModule } from './modules/shops/shops.module';
+import { JobsModule } from './modules/jobs/jobs.module';
+import { RealtimeModule } from './modules/realtime/realtime.module';
 
 @Module({
   imports: [
@@ -28,6 +32,10 @@ import { AuthModule } from './modules/auth/auth.module';
     WorldEventsModule,
     HealthModule,
     AuthModule,
+    StocksModule,
+    ShopsModule,
+    JobsModule,
+    RealtimeModule,
   ],
 })
 export class AppModule {}

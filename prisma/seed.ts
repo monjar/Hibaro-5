@@ -520,6 +520,20 @@ async function main() {
     },
   });
 
+  const generalStore = await prisma.building.upsert({
+    where: { id: 'bldg-antrolus-general-store' },
+    update: {},
+    create: {
+      id: 'bldg-antrolus-general-store',
+      districtId: arrivalYard.id,
+      name: 'Arrivals Provisions',
+      description: 'A licensed general store catering to new arrivals.',
+      ownerType: 'SYSTEM',
+      functionality: ['SHOP'],
+      status: 'OPEN',
+    },
+  });
+
   // Update faction headquarters
   await prisma.faction.update({
     where: { id: redMarket.id },
@@ -543,7 +557,7 @@ async function main() {
     data: { controllingFactionId: glasswaterCivicAuthority.id },
   });
 
-  console.log('✅ Buildings: 9 buildings on Antrolus');
+  console.log('✅ Buildings: 10 buildings on Antrolus');
 
   // ==================== ITEM DEFINITIONS ====================
   const rustyPulsePistol = await prisma.itemDefinition.upsert({
@@ -671,6 +685,59 @@ async function main() {
 
   console.log('✅ Item definitions: 9 items');
 
+  // ==================== SHOP INVENTORIES ====================
+  type ShopSeed = {
+    buildingId: string;
+    itemDefinitionId: string;
+    priceCredits: number;
+    contraband?: boolean;
+    condition?: number;
+  };
+
+  const shopSeeds: ShopSeed[] = [
+    // Arrivals Provisions (legal general store)
+    { buildingId: generalStore.id, itemDefinitionId: medicalPatch.id, priceCredits: 45 },
+    { buildingId: generalStore.id, itemDefinitionId: medicalPatch.id, priceCredits: 45 },
+    { buildingId: generalStore.id, itemDefinitionId: medicalPatch.id, priceCredits: 45 },
+    { buildingId: generalStore.id, itemDefinitionId: workerJacket.id, priceCredits: 35, condition: 90 },
+    { buildingId: generalStore.id, itemDefinitionId: cheapHackingDeck.id, priceCredits: 110 },
+    { buildingId: generalStore.id, itemDefinitionId: antrolusTransitPass.id, priceCredits: 12 },
+    { buildingId: generalStore.id, itemDefinitionId: brokenDronePart.id, priceCredits: 18 },
+    // Furnace Row Underground (black market)
+    { buildingId: blackMarket.id, itemDefinitionId: rustyPulsePistol.id, priceCredits: 75, contraband: true, condition: 60 },
+    { buildingId: blackMarket.id, itemDefinitionId: smugglerToolkit.id, priceCredits: 220, contraband: true },
+    { buildingId: blackMarket.id, itemDefinitionId: cheapHackingDeck.id, priceCredits: 95, condition: 80 },
+    { buildingId: blackMarket.id, itemDefinitionId: corporateAccessCard.id, priceCredits: 350, contraband: true },
+    { buildingId: blackMarket.id, itemDefinitionId: medicalPatch.id, priceCredits: 50 },
+    // Arrivals Clinic (medical only)
+    { buildingId: clinic.id, itemDefinitionId: medicalPatch.id, priceCredits: 35 },
+    { buildingId: clinic.id, itemDefinitionId: medicalPatch.id, priceCredits: 35 },
+  ];
+
+  // Only seed shop inventory if shops appear empty (idempotent on re-seed)
+  for (const buildingId of [generalStore.id, blackMarket.id, clinic.id]) {
+    const existing = await prisma.itemInstance.count({
+      where: { ownerType: 'BUILDING', ownerId: buildingId },
+    });
+    if (existing > 0) continue;
+    const seedsForBuilding = shopSeeds.filter((s) => s.buildingId === buildingId);
+    for (const seed of seedsForBuilding) {
+      await prisma.itemInstance.create({
+        data: {
+          itemDefinitionId: seed.itemDefinitionId,
+          ownerType: 'BUILDING',
+          ownerId: seed.buildingId,
+          condition: seed.condition ?? 100,
+          modifiers: {
+            priceCredits: seed.priceCredits,
+            contraband: seed.contraband === true,
+          },
+        },
+      });
+    }
+  }
+  console.log('✅ Shop inventories seeded for 3 shops');
+
   // ==================== SEED PLAYER & CHARACTER ====================
   const testPlayer = await prisma.player.upsert({
     where: { username: 'test_player' },
@@ -754,6 +821,23 @@ async function main() {
       type: 'LOGIN',
       message: 'Nova Rook arrived at Antrolus Arrival Yard.',
       relatedEntities: { planetId: antrolus.id, districtId: arrivalYard.id },
+    },
+  });
+
+  // Give Nova Rook a small starter stock holding
+  await prisma.stockHolding.upsert({
+    where: {
+      characterId_corporationId: {
+        characterId: novaRook.id,
+        corporationId: pigeonCorp.id,
+      },
+    },
+    update: {},
+    create: {
+      characterId: novaRook.id,
+      corporationId: pigeonCorp.id,
+      shares: 2,
+      averagePrice: pigeonCorp.stockPrice ?? 0,
     },
   });
 
@@ -982,7 +1066,7 @@ async function main() {
   // GIG 1: Move the Medical Crates
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-move-medical-crates' },
-    update: {},
+    update: { difficulty: 12 },
     create: {
       id: 'opp-move-medical-crates',
       title: 'Move the Medical Crates',
@@ -994,7 +1078,7 @@ async function main() {
       type: 'SMUGGLING',
       requirements: [{ type: 'STAT_MIN', key: 'stealth', value: 5 }],
       durationMinutes: 10,
-      difficulty: 2,
+      difficulty: 12,
       rewards: [
         { type: 'CREDITS', value: 300 },
         { type: 'FACTION_REPUTATION', factionId: redMarket.id, value: 5 },
@@ -1015,7 +1099,7 @@ async function main() {
   // GIG 2: Patch the Furnace Sensors
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-patch-furnace-sensors' },
-    update: {},
+    update: { difficulty: 12 },
     create: {
       id: 'opp-patch-furnace-sensors',
       title: 'Patch the Furnace Sensors',
@@ -1027,7 +1111,7 @@ async function main() {
       type: 'REPAIR',
       requirements: [{ type: 'STAT_MIN', key: 'engineering', value: 5 }],
       durationMinutes: 15,
-      difficulty: 2,
+      difficulty: 12,
       rewards: [
         { type: 'CREDITS', value: 350 },
         { type: 'CORPORATION_REPUTATION', corporationId: helixDynamics.id, value: 5 },
@@ -1048,7 +1132,7 @@ async function main() {
   // JOB 1: Worker Shift at Furnace Row
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-furnace-worker-shift' },
-    update: {},
+    update: { difficulty: 10 },
     create: {
       id: 'opp-furnace-worker-shift',
       title: 'Worker Shift at Furnace Row',
@@ -1060,7 +1144,7 @@ async function main() {
       type: 'REPAIR',
       requirements: [],
       durationMinutes: 30,
-      difficulty: 1,
+      difficulty: 10,
       rewards: [
         { type: 'CREDITS', value: 200 },
         { type: 'STAT_XP', key: 'engineering', value: 1 },
@@ -1074,7 +1158,7 @@ async function main() {
   // JOB 2: Courier Loop
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-courier-loop' },
-    update: {},
+    update: { difficulty: 10 },
     create: {
       id: 'opp-courier-loop',
       title: 'Courier Loop',
@@ -1085,7 +1169,7 @@ async function main() {
       type: 'DELIVERY',
       requirements: [],
       durationMinutes: 20,
-      difficulty: 1,
+      difficulty: 10,
       rewards: [
         { type: 'CREDITS', value: 180 },
         { type: 'CORPORATION_REPUTATION', corporationId: pigeonCorp.id, value: 2 },
@@ -1099,7 +1183,7 @@ async function main() {
   // QUEST 1: Welcome to Antrolus
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-quest-welcome-antrolus' },
-    update: {},
+    update: { difficulty: 10 },
     create: {
       id: 'opp-quest-welcome-antrolus',
       title: 'Welcome to Antrolus',
@@ -1110,14 +1194,18 @@ async function main() {
       type: 'STORY',
       requirements: [],
       durationMinutes: null,
-      difficulty: 1,
+      difficulty: 10,
       rewards: [
         { type: 'CREDITS', value: 100 },
         { type: 'UNLOCK_BUILDING', buildingId: 'bldg-antrolus-black-market' },
+        { type: 'UNLOCK_QUEST', questId: 'opp-quest-something-in-cargo' },
       ],
       risks: [],
       possibleEventIds: [],
       questData: {
+        chainId: 'chain-antrolus-onboarding',
+        stepNumber: 1,
+        totalSteps: 3,
         objectives: [{ type: 'COMPLETE_GIG_ON_PLANET', planetId: antrolus.id, count: 1 }],
         isOneOff: true,
       },
@@ -1127,7 +1215,7 @@ async function main() {
   // QUEST 2: Something in the Cargo
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-quest-something-in-cargo' },
-    update: {},
+    update: { difficulty: 12 },
     create: {
       id: 'opp-quest-something-in-cargo',
       title: 'Something in the Cargo',
@@ -1139,7 +1227,7 @@ async function main() {
       type: 'STORY',
       requirements: [],
       durationMinutes: null,
-      difficulty: 2,
+      difficulty: 12,
       rewards: [
         { type: 'FACTION_REPUTATION', factionId: coilUnion.id, value: 5 },
         { type: 'UNLOCK_QUEST', questId: 'opp-quest-pigeon95-secret' },
@@ -1147,6 +1235,9 @@ async function main() {
       risks: [],
       possibleEventIds: [],
       questData: {
+        chainId: 'chain-antrolus-onboarding',
+        stepNumber: 2,
+        totalSteps: 3,
         objectives: [{ type: 'COMPLETE_JOB', jobId: 'opp-courier-loop', count: 1 }],
         isOneOff: true,
         hint: 'Start by taking on courier work for Pigeon Corporation.',
@@ -1154,7 +1245,42 @@ async function main() {
     },
   });
 
-  console.log('✅ Opportunity definitions: 2 gigs, 2 jobs, 2 quests');
+  // QUEST 3: Pigeon95 Secret
+  await prisma.opportunityDefinition.upsert({
+    where: { id: 'opp-quest-pigeon95-secret' },
+    update: { difficulty: 14 },
+    create: {
+      id: 'opp-quest-pigeon95-secret',
+      title: 'Pigeon95 Secret',
+      description:
+        'The shipment trail leads to Fulfilment Core. Trace the tampered manifests before they disappear.',
+      kind: 'QUEST',
+      postedByType: 'FACTION',
+      postedById: coilUnion.id,
+      type: 'INVESTIGATION',
+      requirements: [
+        { type: 'CORPORATION_REPUTATION_MAX', id: pigeonCorp.id, value: 15 },
+      ],
+      durationMinutes: 90,
+      difficulty: 14,
+      rewards: [
+        { type: 'CREDITS', value: 180 },
+        { type: 'FACTION_REPUTATION', factionId: coilUnion.id, value: 8 },
+      ],
+      risks: [],
+      possibleEventIds: [],
+      questData: {
+        chainId: 'chain-antrolus-onboarding',
+        stepNumber: 3,
+        totalSteps: 3,
+        objectives: [{ type: 'VISIT_DISTRICT', districtId: fulfilmentCore.id, count: 1 }],
+        isOneOff: true,
+        hint: 'Hostile standing with Pigeon Corporation will lock this step entirely.',
+      },
+    },
+  });
+
+  console.log('✅ Opportunity definitions: 2 gigs, 2 jobs, 3 quests');
 
   // ==================== WORLD EVENTS ====================
   const now = new Date();

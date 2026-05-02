@@ -7,9 +7,13 @@
     "packages/*"
   ],
   "scripts": {
+    "setup:run": "bash ./scripts/setup-and-run.sh",
+    "setup:stop": "bash ./scripts/stop-and-clean.sh",
+    "build:packages": "npm run build --workspace=packages/game-rules && npm run build --workspace=packages/game-types && npm run build --workspace=packages/platform-sdk && npm run build --workspace=packages/validation",
     "dev": "npm run dev --workspace=apps/api",
     "dev:admin": "npm run dev --workspace=apps/admin",
     "dev:web": "npm run dev --workspace=apps/web",
+    "dev:worker": "npm run dev --workspace=apps/worker",
     "build": "npm run build --workspace=apps/api",
     "start": "npm run start --workspace=apps/api",
     "test": "npm run test --workspace=apps/api && npm run test --workspace=packages/game-rules",

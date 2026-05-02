@@ -1,5 +1,11 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  BACKSTORIES,
+  STAT_ALLOCATION_BUDGET,
+  STAT_BASE_VALUE,
+  STAT_MAX_PER_KEY,
+} from '@heliora/game-rules';
 import { AuthGuard } from './auth.guard';
 import { AuthenticatedPlayer, AuthService } from './auth.service';
 import { CurrentPlayer } from './current-player.decorator';
@@ -10,6 +16,19 @@ import { RegisterDto } from './dto/register.dto';
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  @Get('character-options')
+  @ApiOperation({ summary: 'Get available backstories and stat allocation rules' })
+  characterOptions() {
+    return {
+      backstories: BACKSTORIES,
+      statAllocation: {
+        budget: STAT_ALLOCATION_BUDGET,
+        baseValue: STAT_BASE_VALUE,
+        maxPerKey: STAT_MAX_PER_KEY,
+      },
+    };
+  }
 
   @Post('register')
   @ApiOperation({ summary: 'Register a new player account' })

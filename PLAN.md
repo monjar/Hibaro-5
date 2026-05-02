@@ -1,0 +1,85 @@
+# Heliora — Development Plan
+
+This file tracks planned work, active design decisions, and future ideas. Each item includes the files you'll need to touch so you can jump straight in.
+
+---
+
+## Up Next
+
+### 4. Player Housing
+Rent a safehouse for persistent item storage and passive energy/wanted-level recovery bonuses.
+
+**Files to edit:**
+- `prisma/schema.prisma` — add `CharacterHousing` model linking character to a building with rent due date
+- `apps/api/src/modules/characters/` — `POST /characters/:id/rent` and `GET /characters/:id/housing`
+- `apps/api/src/modules/simulation/simulation.service.ts` — collect rent each tick, apply passive bonuses
+
+---
+
+### 5. Faction Wars
+Factions actively compete for district control each tick based on influence and world events.
+
+**Files to edit:**
+- `apps/api/src/modules/simulation/simulation.service.ts` — add `advanceFactionWars()` step: factions with high influence in adjacent districts bid for control; winner updates `district.controllingFactionId`
+- `apps/web/src/app/travel/page.tsx` — show controlling faction and its alignment on each district
+
+---
+
+### 6. Replayable Ticks
+Persist random seeds per tick and expose replay tooling for balance testing.
+
+**Files to edit:**
+- `apps/api/src/modules/simulation/simulation.service.ts` — generate and store a `randomSeed` per tick in `SimulationHistory`
+- `prisma/schema.prisma` — add `seed` field to `SimulationHistory`
+- `packages/game-rules/src/` — all outcome functions already accept optional `randomSeed`; wire them through
+- `apps/admin/` — add a "Replay tick" button that re-runs a historical tick with the same seed
+
+---
+
+## Future Ideas
+
+These are good long-term directions but not scoped for near-term work.
+
+### Combat System
+Turn-based or dice-roll combat integrated as a resolution mechanic inside certain gigs/jobs/quests (e.g. bounty hunting, assassination, corporate raid). Not a standalone mode — just an outcome type.
+
+### Crafting
+Use raw materials and schematics to craft tools, weapons, and gear. Requires an inventory-slot system and material item types first.
+
+### Ship Upgrades and Fleet Logistics
+Cargo capacity, travel range, escort risk, and route planning once the travel system is more complex.
+
+### Character Progression Trees
+Skills, specializations, and perks that unlock as characters complete more activities.
+
+### Worker Deployment Parity
+Run the BullMQ worker (`apps/worker`) through Docker Compose for sharded background processing on multi-instance deploys.
+
+---
+
+## Shipped
+
+- **1. Realtime tick updates via SSE** — `GET /simulation/stream` now publishes `simulation.tick.completed` plus notable NPC activity as server-sent events. The player dashboard and opportunity board subscribe through `apps/web/src/lib/use-event-stream.ts`, so due completions arrive without the old 12-second polling loop.
+- **2. Quest chains and prerequisite unlocks** — Opportunity availability now respects completed-quest history, `UNLOCK_QUEST` reward edges, one-off quest completion, and shared requirement checks. The seeded story line is now a 3-step chain (`Welcome to Antrolus` → `Something in the Cargo` → `Pigeon95 Secret`) with `questData.chainId`, step counts, and board-side progress/hint display.
+- **3. Reputation perks, lockouts, and route penalties** — Shared requirement logic now supports maximum reputation lockouts (`RELATIONSHIP_MAX`, `FACTION_REPUTATION_MAX`, `CORPORATION_REPUTATION_MAX`), opportunity acceptance enforces those rules server-side, and travel quotes apply faction-control standing checks with hostile surcharges or outright district lockouts.
+
+- **Admin CRUD — full coverage** — Opportunities, Locations (planets/districts/buildings), Factions, Corporations, World Events, and Item Definitions all expose `POST/PATCH/DELETE` with referential-integrity checks (e.g. you can't delete a planet that still has districts or characters on it). Admin pages live at `apps/admin/src/app/<entity>/page.tsx`, share the `AdminShell` chrome, and call typed SDK methods. All admin writes are gated by an `AdminGuard` (`apps/api/src/modules/auth/admin.guard.ts`) — set `ADMIN_TOKEN` in `.env` and enter the same value in the admin header to authorise. Leaving `ADMIN_TOKEN` blank disables the gate for local dev.
+- **Multi-step character creation** — Backstory archetypes (Ex-Soldier, Smuggler, Corporate Drone, Street Hacker, Drifter) with stat bonuses + free 12-point allocation + motivation prompt. Pure logic in `packages/game-rules/src/character-creation.ts` with 12 unit tests.
+- **Single active activity** — Players can only work one gig/job/quest at a time; UI shows "BUSY" on accept buttons. 8 unit tests covering accept paths.
+- **Jobs vs Gigs** — JOB-kind opportunities require a hire step (`POST /jobs/:opportunityId/hire`) and produce a `JobEmployment` row. Each shift is a normal accept→resolve. The world-tick scheduler issues strikes for missed shifts (default 24h cadence) with a credit penalty; 3 strikes = FIRED. Pure tick logic in `packages/game-rules/src/jobs.ts` with 6 tests.
+- **Stock market visibility** — `StockPriceHistory` records per-tick prices; `/stocks/market` returns delta + percent change + 24-point sparkline. Player market page renders tiny SVG sparklines and ▲/▼ deltas. Deterministic random-walk price function in `packages/game-rules/src/stock-prices.ts` (6 tests).
+- Player web app (dashboard, opportunities, inventory, shop, travel, stock market, activity log)
+- JWT authentication — register/login/me, browser session with localStorage
+- Admin panel — Next.js control plane at `localhost:3002`
+- Auto-tick scheduler — in-process 30s world tick, configurable via env
+- Travel costs — inter-planet credit costs, danger-based wanted-level risk, energy drain, travel quote preview
+- Shops and black markets — buildings stock items; black markets give contraband sell premium
+- Contraband loops (v1) — buying contraband in high-law districts raises heat
+- Stock market — per-corporation prices moving each tick; player portfolios with avg-cost basis and unrealized P/L
+- Safehouse / clinic / hub rest — energy + health recovery; safehouses reduce wanted level
+- Consumable items — use medical patches and other consumables from inventory
+- NPC simulation — NPCs accept opportunities, build relationships, push corp/faction state forward each tick
+- Richer economy simulation — planetary economy drift, world-event pressure, demand/risk/travel indices
+- Corporation boom/bust cycles — cash, debt, revenue, bankruptcy risk evolve each tick
+- Dynamic district control — faction influence drives district control score and travel surcharges
+- Simulation observability — admin dashboard with tick history and step-by-step summaries

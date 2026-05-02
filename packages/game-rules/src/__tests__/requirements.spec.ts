@@ -44,6 +44,18 @@ describe('checkRequirement', () => {
     });
   });
 
+  describe('STAT_MAX', () => {
+    it('passes when stat is below maximum', () => {
+      const req: Requirement = { type: 'STAT_MAX', key: 'hacking', value: 8 };
+      expect(checkRequirement(baseCharacter, req)).toBe(true);
+    });
+
+    it('fails when stat is above maximum', () => {
+      const req: Requirement = { type: 'STAT_MAX', key: 'hacking', value: 3 };
+      expect(checkRequirement(baseCharacter, req)).toBe(false);
+    });
+  });
+
   describe('CREDITS_MIN', () => {
     it('passes when credits meet minimum', () => {
       const req: Requirement = { type: 'CREDITS_MIN', value: 100 };
@@ -86,6 +98,56 @@ describe('checkRequirement', () => {
 
     it('fails when faction not in context (defaults to 0)', () => {
       const req: Requirement = { type: 'FACTION_REPUTATION_MIN', id: 'unknown-faction', value: 5 };
+      expect(checkRequirement(baseCharacter, req, context)).toBe(false);
+    });
+  });
+
+  describe('FACTION_REPUTATION_MAX', () => {
+    const context: RequirementContext = {
+      factionReputations: { 'faction-red-market': -15 },
+    };
+
+    it('passes when faction reputation is at or below maximum', () => {
+      const req: Requirement = {
+        type: 'FACTION_REPUTATION_MAX',
+        id: 'faction-red-market',
+        value: -10,
+      };
+      expect(checkRequirement(baseCharacter, req, context)).toBe(true);
+    });
+
+    it('fails when faction reputation is above maximum', () => {
+      const req: Requirement = {
+        type: 'FACTION_REPUTATION_MAX',
+        id: 'faction-red-market',
+        value: -20,
+      };
+      expect(checkRequirement(baseCharacter, req, context)).toBe(false);
+    });
+  });
+
+  describe('RELATIONSHIP_MAX', () => {
+    const context: RequirementContext = {
+      corporationReputations: { 'corp-helix': 22 },
+    };
+
+    it('passes for corporation reputation lockouts when value is below threshold', () => {
+      const req: Requirement = {
+        type: 'RELATIONSHIP_MAX',
+        scope: 'CORPORATION',
+        id: 'corp-helix',
+        value: 25,
+      };
+      expect(checkRequirement(baseCharacter, req, context)).toBe(true);
+    });
+
+    it('fails for corporation reputation lockouts when value is above threshold', () => {
+      const req: Requirement = {
+        type: 'RELATIONSHIP_MAX',
+        scope: 'CORPORATION',
+        id: 'corp-helix',
+        value: 10,
+      };
       expect(checkRequirement(baseCharacter, req, context)).toBe(false);
     });
   });

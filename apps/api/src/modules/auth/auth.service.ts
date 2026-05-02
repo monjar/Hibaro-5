@@ -1,10 +1,16 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import {
+  Backstory,
+  buildStartingCharacter,
+  CharacterCreationError,
+} from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { hashPassword, verifyPassword } from '../../../../../prisma/password-hash';
 import { LoginDto } from './dto/login.dto';
@@ -62,6 +68,21 @@ export class AuthService {
     const passwordHash = await hashPassword(dto.password);
     const startingLocation = await this.resolveStartingLocation();
 
+    let starter;
+    try {
+      starter = buildStartingCharacter({
+        backstory: (dto.backstory as Backstory | undefined) ?? 'DRIFTER',
+        statAllocation: dto.statAllocation,
+      });
+    } catch (err) {
+      if (err instanceof CharacterCreationError) {
+        throw new BadRequestException(err.message);
+      }
+      throw err;
+    }
+
+    const motivation = dto.motivation?.trim() ?? null;
+
     const player = await this.prisma.$transaction(async (tx) => {
       const createdPlayer = await tx.player.create({
         data: {
@@ -79,20 +100,21 @@ export class AuthService {
           currentPlanetId: startingLocation?.planetId,
           currentDistrictId: startingLocation?.districtId,
           currentBuildingId: startingLocation?.buildingId,
-          credits: 250,
+          credits: starter.startingCredits,
           health: 100,
           maxHealth: 100,
           energy: 100,
           maxEnergy: 100,
+          lastEnergyDecayAt: new Date(),
           wantedLevel: 0,
-          strength: 6,
-          agility: 5,
-          intelligence: 7,
-          charisma: 6,
-          hacking: 5,
-          combat: 5,
-          stealth: 5,
-          engineering: 6,
+          strength: starter.stats.strength,
+          agility: starter.stats.agility,
+          intelligence: starter.stats.intelligence,
+          charisma: starter.stats.charisma,
+          hacking: starter.stats.hacking,
+          combat: starter.stats.combat,
+          stealth: starter.stats.stealth,
+          engineering: starter.stats.engineering,
           reputation: 0,
         },
       });
@@ -102,8 +124,12 @@ export class AuthService {
           playerId: createdPlayer.id,
           characterId: character.id,
           type: 'REGISTERED',
-          message: `${character.name} entered Hibaro-5.`,
-          ...(startingLocation ? { relatedEntities: startingLocation } : {}),
+          message: `${character.name} entered Hibaro-5${motivation ? ` — ${motivation}` : '.'}`,
+          relatedEntities: {
+            ...(startingLocation ?? {}),
+            backstory: dto.backstory ?? 'DRIFTER',
+            motivation,
+          },
         },
       });
 

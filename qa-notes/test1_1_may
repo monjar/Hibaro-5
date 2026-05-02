@@ -1,0 +1,11 @@
+Bugs:
+1. the job/gig progress should move automatically. right now it needs a restart
+2. the password and email validation in the register form should be handled in the fronend.
+3. player now can have multiple jobs. which is not needed for this version. limit to one only
+4. the world events say Scope: DISTRICT · ends just now. this is very confusing and if somehting is ended it should go away or sth
+
+
+Features needed:
+1. Energy should also decay by time. for example 3 energy every hour or sth
+2. In the admin panel I will need to have selectors that will connect for example quest rewards to Items. where I can say for example X quest will reward you Item Y
+3. in the oppurtunities tab, the GIGS, JOB and the QUEST should be in separate panels. with more emphisis on the quest part. Also if there are available quests to do, they should come up in the main page.

@@ -1,5 +1,4 @@
-// Re-export types from game-rules for convenience
-export * from '../../game-rules/src/types';
+export * from '@heliora/game-rules';
 
 // Additional shared types
 export type Nullable<T> = T | null;

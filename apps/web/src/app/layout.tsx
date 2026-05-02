@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { SessionProvider } from '@/lib/session-context';
+import { Nav } from '@/components/Nav';
 
 export const metadata: Metadata = {
   title: 'Heliora | Hibaro-5',
@@ -9,7 +11,12 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-heliora-dark">{children}</body>
+      <body className="min-h-screen bg-heliora-dark">
+        <SessionProvider>
+          <Nav />
+          {children}
+        </SessionProvider>
+      </body>
     </html>
   );
 }

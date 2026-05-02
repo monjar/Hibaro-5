@@ -26,7 +26,7 @@ const smugglingGig: OpportunityDefinition = {
   title: 'Move the Medical Crates',
   kind: 'GIG',
   type: 'SMUGGLING',
-  difficulty: 2,
+  difficulty: 12,
   requirements: [{ type: 'STAT_MIN', key: 'stealth', value: 5 }],
   rewards: [
     { type: 'CREDITS', value: 300 },
@@ -44,9 +44,9 @@ const smugglingGig: OpportunityDefinition = {
 };
 
 describe('resolveOpportunity', () => {
-  describe('on success (randomSeed = 0.1)', () => {
+  describe('on success (randomSeed = 0.75)', () => {
     it('applies credits reward', () => {
-      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.1);
+      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.75);
       expect(result.outcome.success).toBe(true);
       expect(result.rewardResult).not.toBeNull();
       expect(result.rewardResult!.creditsDelta).toBe(300);
@@ -54,24 +54,24 @@ describe('resolveOpportunity', () => {
     });
 
     it('applies faction reputation reward', () => {
-      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.1);
+      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.75);
       expect(result.rewardResult!.factionReputationChanges['faction-red-market']).toBe(5);
     });
 
     it('applies negative corporation reputation reward', () => {
-      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.1);
+      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.75);
       expect(result.rewardResult!.corporationReputationChanges['corp-helix']).toBe(-2);
     });
 
     it('does not apply risks on success', () => {
-      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.1);
+      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.75);
       expect(result.riskResult).toBeNull();
     });
   });
 
-  describe('on failure (randomSeed = 0.99)', () => {
+  describe('on failure (randomSeed = 0.1)', () => {
     it('does not apply rewards on failure', () => {
-      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.99);
+      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.1);
       expect(result.outcome.success).toBe(false);
       expect(result.rewardResult).toBeNull();
     });
@@ -83,7 +83,7 @@ describe('resolveOpportunity', () => {
       const originalRandom = Math.random;
       Math.random = jest.fn().mockReturnValue(0.1); // below 0.3, so risk triggers
 
-      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.99);
+      const result = resolveOpportunity(baseCharacter, smugglingGig, 0.1);
       expect(result.outcome.success).toBe(false);
       expect(result.riskResult).not.toBeNull();
       expect(result.riskResult!.wantedLevelDelta).toBe(1);
@@ -100,12 +100,12 @@ describe('resolveOpportunity', () => {
         title: 'Empty',
         kind: 'JOB',
         type: 'DELIVERY',
-        difficulty: 1,
+        difficulty: 10,
         requirements: [],
         rewards: [],
         risks: [],
       };
-      const result = resolveOpportunity(baseCharacter, emptyOpp, 0.1);
+      const result = resolveOpportunity(baseCharacter, emptyOpp, 0.75);
       expect(result.outcome).toBeDefined();
       expect(result.characterUpdates).toBeDefined();
     });
@@ -117,7 +117,7 @@ describe('resolveOpportunity', () => {
         title: 'Dangerous Gig',
         kind: 'GIG',
         type: 'BOUNTY',
-        difficulty: 1,
+        difficulty: 20,
         requirements: [],
         rewards: [],
         risks: [
@@ -129,7 +129,7 @@ describe('resolveOpportunity', () => {
           },
         ],
       };
-      const result = resolveOpportunity(char, injuryOpp, 0.99); // force failure
+      const result = resolveOpportunity(char, injuryOpp, 0.1); // force failure
       if (result.characterUpdates.health !== undefined) {
         expect(result.characterUpdates.health).toBeGreaterThanOrEqual(0);
       }
