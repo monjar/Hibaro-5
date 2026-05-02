@@ -79,6 +79,7 @@ export interface OpportunityDefinition {
   requirements: Record<string, unknown>[];
   rewards: Record<string, unknown>[];
   risks: Record<string, unknown>[];
+  possibleEventIds?: string[] | null;
   repeatability?: unknown;
   questData?: {
     chainId?: string;
@@ -88,6 +89,8 @@ export interface OpportunityDefinition {
     hint?: string;
     objectives?: Array<Record<string, unknown>>;
   } | null;
+  startsAvailableAt?: string | null;
+  endsAvailableAt?: string | null;
 }
 
 export interface AdminOpportunityInput {
@@ -100,7 +103,18 @@ export interface AdminOpportunityInput {
   requirements?: unknown[];
   rewards?: unknown[];
   risks?: unknown[];
+  possibleEventIds?: string[];
   repeatability?: unknown;
+  questData?: {
+    chainId?: string;
+    stepNumber?: number;
+    totalSteps?: number;
+    isOneOff?: boolean;
+    hint?: string;
+    objectives?: Array<Record<string, unknown>>;
+  } | null;
+  startsAvailableAt?: string | null;
+  endsAvailableAt?: string | null;
 }
 
 export type PlanetType =

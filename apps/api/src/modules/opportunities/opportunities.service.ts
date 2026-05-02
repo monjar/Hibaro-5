@@ -33,7 +33,11 @@ export interface AdminOpportunityInput {
   requirements?: unknown[];
   rewards?: unknown[];
   risks?: unknown[];
+  possibleEventIds?: string[];
   repeatability?: unknown;
+  questData?: QuestDataEntry | null;
+  startsAvailableAt?: string | null;
+  endsAvailableAt?: string | null;
 }
 
 type RewardEntry = Record<string, unknown>;
@@ -77,7 +81,11 @@ export class OpportunitiesService {
         requirements: (data.requirements ?? []) as never,
         rewards: (data.rewards ?? []) as never,
         risks: (data.risks ?? []) as never,
+        possibleEventIds: (data.possibleEventIds ?? []) as never,
         repeatability: (data.repeatability ?? null) as never,
+        questData: (data.questData ?? null) as never,
+        startsAvailableAt: data.startsAvailableAt ? new Date(data.startsAvailableAt) : null,
+        endsAvailableAt: data.endsAvailableAt ? new Date(data.endsAvailableAt) : null,
       },
     });
   }
@@ -104,8 +112,24 @@ export class OpportunitiesService {
           : {}),
         ...(data.rewards !== undefined ? { rewards: data.rewards as never } : {}),
         ...(data.risks !== undefined ? { risks: data.risks as never } : {}),
+        ...(data.possibleEventIds !== undefined
+          ? { possibleEventIds: (data.possibleEventIds ?? []) as never }
+          : {}),
         ...(data.repeatability !== undefined
           ? { repeatability: (data.repeatability ?? null) as never }
+          : {}),
+        ...(data.questData !== undefined ? { questData: (data.questData ?? null) as never } : {}),
+        ...(data.startsAvailableAt !== undefined
+          ? {
+              startsAvailableAt: data.startsAvailableAt
+                ? new Date(data.startsAvailableAt)
+                : null,
+            }
+          : {}),
+        ...(data.endsAvailableAt !== undefined
+          ? {
+              endsAvailableAt: data.endsAvailableAt ? new Date(data.endsAvailableAt) : null,
+            }
           : {}),
       },
     });
@@ -139,6 +163,19 @@ export class OpportunitiesService {
     }
     if (input.durationMinutes !== undefined && input.durationMinutes < 1) {
       throw new BadRequestException('durationMinutes must be at least 1');
+    }
+    if (input.startsAvailableAt && Number.isNaN(new Date(input.startsAvailableAt).getTime())) {
+      throw new BadRequestException('startsAvailableAt must be a valid ISO datetime');
+    }
+    if (input.endsAvailableAt && Number.isNaN(new Date(input.endsAvailableAt).getTime())) {
+      throw new BadRequestException('endsAvailableAt must be a valid ISO datetime');
+    }
+    if (
+      input.startsAvailableAt &&
+      input.endsAvailableAt &&
+      new Date(input.startsAvailableAt).getTime() > new Date(input.endsAvailableAt).getTime()
+    ) {
+      throw new BadRequestException('Availability start must be before the end time');
     }
   }
 
