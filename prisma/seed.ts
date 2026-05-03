@@ -1066,12 +1066,22 @@ async function main() {
   // GIG 1: Move the Medical Crates
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-move-medical-crates' },
-    update: { difficulty: 12 },
+    update: {
+      difficulty: 12,
+      acceptedDescription:
+        'The crates are already tagged and staged. Keep them moving, keep your head down, and do not let station security connect the cargo to Red Market.',
+      timelineEvents: [
+        { minute: 2, description: 'A forklift convoy rattles past and forces you to tuck the crates into shadow.' },
+        { minute: 7, successDescription: 'You slip the shipment through a maintenance cutout before the patrol completes its sweep.', failureDescription: 'A patrol pauses at the checkpoint and your route tightens into a risky sprint.' },
+      ],
+    },
     create: {
       id: 'opp-move-medical-crates',
       title: 'Move the Medical Crates',
       description:
         'Red Market needs someone to quietly move a shipment of medical supplies through Arrival Yard. No questions asked.',
+      acceptedDescription:
+        'The crates are already tagged and staged. Keep them moving, keep your head down, and do not let station security connect the cargo to Red Market.',
       kind: 'GIG',
       postedByType: 'FACTION',
       postedById: redMarket.id,
@@ -1092,6 +1102,10 @@ async function main() {
           consequences: [{ type: 'MODIFY_WANTED_LEVEL', value: 1 }],
         },
       ],
+      timelineEvents: [
+        { minute: 2, description: 'A forklift convoy rattles past and forces you to tuck the crates into shadow.' },
+        { minute: 7, successDescription: 'You slip the shipment through a maintenance cutout before the patrol completes its sweep.', failureDescription: 'A patrol pauses at the checkpoint and your route tightens into a risky sprint.' },
+      ],
       possibleEventIds: [],
     },
   });
@@ -1099,12 +1113,22 @@ async function main() {
   // GIG 2: Patch the Furnace Sensors
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-patch-furnace-sensors' },
-    update: { difficulty: 12 },
+    update: {
+      difficulty: 12,
+      acceptedDescription:
+        'You are stepping into heat, noise, and a maintenance network held together by emergency clamps. Keep the line online and do not trip the refinery failsafes.',
+      timelineEvents: [
+        { minute: 3, description: 'The first sensor cluster is coated in soot and throwing phantom readings.' },
+        { minute: 11, successDescription: 'Your patch stabilizes the readouts and the furnace settles into a smooth burn.', failureDescription: 'A loose relay spits sparks and the whole rack shudders under your hands.' },
+      ],
+    },
     create: {
       id: 'opp-patch-furnace-sensors',
       title: 'Patch the Furnace Sensors',
       description:
         'Helix Dynamics needs a technician to patch malfunctioning environmental sensors in Furnace Row.',
+      acceptedDescription:
+        'You are stepping into heat, noise, and a maintenance network held together by emergency clamps. Keep the line online and do not trip the refinery failsafes.',
       kind: 'GIG',
       postedByType: 'CORPORATION',
       postedById: helixDynamics.id,
@@ -1125,6 +1149,10 @@ async function main() {
           consequences: [{ type: 'MODIFY_STAT', key: 'health', value: -15 }],
         },
       ],
+      timelineEvents: [
+        { minute: 3, description: 'The first sensor cluster is coated in soot and throwing phantom readings.' },
+        { minute: 11, successDescription: 'Your patch stabilizes the readouts and the furnace settles into a smooth burn.', failureDescription: 'A loose relay spits sparks and the whole rack shudders under your hands.' },
+      ],
       possibleEventIds: [],
     },
   });
@@ -1132,12 +1160,22 @@ async function main() {
   // JOB 1: Worker Shift at Furnace Row
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-furnace-worker-shift' },
-    update: { difficulty: 10 },
+    update: {
+      difficulty: 10,
+      acceptedDescription:
+        'Clock in, keep the line fed, and stay ahead of the foreman’s inspection rounds. The refinery pays for output, not excuses.',
+      timelineEvents: [
+        { minute: 8, description: 'Shift alarms cycle and another cart of raw feedstock slams onto your lane.' },
+        { minute: 20, successDescription: 'You settle into a fast rhythm and the crew stops watching you like dead weight.', failureDescription: 'The pace breaks your rhythm and the foreman starts marking missed steps.' },
+      ],
+    },
     create: {
       id: 'opp-furnace-worker-shift',
       title: 'Worker Shift at Furnace Row',
       description:
         'A standard labor shift at the Helix Dynamics refineries. Hard work, steady pay.',
+      acceptedDescription:
+        'Clock in, keep the line fed, and stay ahead of the foreman’s inspection rounds. The refinery pays for output, not excuses.',
       kind: 'JOB',
       postedByType: 'CORPORATION',
       postedById: helixDynamics.id,
@@ -1150,6 +1188,10 @@ async function main() {
         { type: 'STAT_XP', key: 'engineering', value: 1 },
       ],
       risks: [],
+      timelineEvents: [
+        { minute: 8, description: 'Shift alarms cycle and another cart of raw feedstock slams onto your lane.' },
+        { minute: 20, successDescription: 'You settle into a fast rhythm and the crew stops watching you like dead weight.', failureDescription: 'The pace breaks your rhythm and the foreman starts marking missed steps.' },
+      ],
       possibleEventIds: [],
       repeatability: { type: 'DAILY' },
     },
@@ -1158,11 +1200,21 @@ async function main() {
   // JOB 2: Courier Loop
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-courier-loop' },
-    update: { difficulty: 10 },
+    update: {
+      difficulty: 10,
+      acceptedDescription:
+        'The route stack is time-boxed and tightly tracked. Miss a handoff and dispatch will know before you finish cursing.',
+      timelineEvents: [
+        { minute: 4, description: 'Dispatch pushes a reroute around a clogged freight corridor.' },
+        { minute: 14, successDescription: 'You thread the detour cleanly and stay inside the delivery window.', failureDescription: 'A bad handoff burns your margin and the rest of the route goes sideways.' },
+      ],
+    },
     create: {
       id: 'opp-courier-loop',
       title: 'Courier Loop',
       description: 'Run delivery routes for Pigeon Corporation around Antrolus.',
+      acceptedDescription:
+        'The route stack is time-boxed and tightly tracked. Miss a handoff and dispatch will know before you finish cursing.',
       kind: 'JOB',
       postedByType: 'CORPORATION',
       postedById: pigeonCorp.id,
@@ -1175,6 +1227,10 @@ async function main() {
         { type: 'CORPORATION_REPUTATION', corporationId: pigeonCorp.id, value: 2 },
       ],
       risks: [],
+      timelineEvents: [
+        { minute: 4, description: 'Dispatch pushes a reroute around a clogged freight corridor.' },
+        { minute: 14, successDescription: 'You thread the detour cleanly and stay inside the delivery window.', failureDescription: 'A bad handoff burns your margin and the rest of the route goes sideways.' },
+      ],
       possibleEventIds: [],
       repeatability: { type: 'COOLDOWN', cooldownHours: 4 },
     },
@@ -1183,12 +1239,21 @@ async function main() {
   // QUEST 1: Welcome to Antrolus
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-quest-welcome-antrolus' },
-    update: { difficulty: 10 },
+    update: {
+      difficulty: 10,
+      acceptedDescription:
+        'This is your first real measure on Antrolus. Take a contract, come back alive, and show the station you can operate under pressure.',
+      timelineEvents: [
+        { minute: 1, description: 'Every corridor, warning light, and loudspeaker feels newly hostile.' },
+      ],
+    },
     create: {
       id: 'opp-quest-welcome-antrolus',
       title: 'Welcome to Antrolus',
       description:
         'Get your bearings. Complete your first gig on Antrolus and prove you can survive.',
+      acceptedDescription:
+        'This is your first real measure on Antrolus. Take a contract, come back alive, and show the station you can operate under pressure.',
       kind: 'QUEST',
       postedByType: 'SYSTEM',
       type: 'STORY',
@@ -1201,6 +1266,9 @@ async function main() {
         { type: 'UNLOCK_QUEST', questId: 'opp-quest-something-in-cargo' },
       ],
       risks: [],
+      timelineEvents: [
+        { minute: 1, description: 'Every corridor, warning light, and loudspeaker feels newly hostile.' },
+      ],
       possibleEventIds: [],
       questData: {
         chainId: 'chain-antrolus-onboarding',
@@ -1215,12 +1283,21 @@ async function main() {
   // QUEST 2: Something in the Cargo
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-quest-something-in-cargo' },
-    update: { difficulty: 12 },
+    update: {
+      difficulty: 12,
+      acceptedDescription:
+        'The Coil Union wants proof, not rumors. Follow the cargo trail, pull the thread gently, and do not tip off Pigeon before you know what is inside.',
+      timelineEvents: [
+        { minute: 5, description: 'The manifest numbers stop lining up and someone has scrubbed the last handler signature.' },
+      ],
+    },
     create: {
       id: 'opp-quest-something-in-cargo',
       title: 'Something in the Cargo',
       description:
         'The Coil Union intercepted something unusual in a Pigeon shipment. Find out what it is.',
+      acceptedDescription:
+        'The Coil Union wants proof, not rumors. Follow the cargo trail, pull the thread gently, and do not tip off Pigeon before you know what is inside.',
       kind: 'QUEST',
       postedByType: 'FACTION',
       postedById: coilUnion.id,
@@ -1233,6 +1310,9 @@ async function main() {
         { type: 'UNLOCK_QUEST', questId: 'opp-quest-pigeon95-secret' },
       ],
       risks: [],
+      timelineEvents: [
+        { minute: 5, description: 'The manifest numbers stop lining up and someone has scrubbed the last handler signature.' },
+      ],
       possibleEventIds: [],
       questData: {
         chainId: 'chain-antrolus-onboarding',
@@ -1248,12 +1328,22 @@ async function main() {
   // QUEST 3: Pigeon95 Secret
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-quest-pigeon95-secret' },
-    update: { difficulty: 14 },
+    update: {
+      difficulty: 14,
+      acceptedDescription:
+        'Fulfilment Core is running hot and somebody is already cleaning the trail. Move fast enough to catch the lie before it is rewritten behind you.',
+      timelineEvents: [
+        { minute: 12, description: 'A manifest cluster vanishes from the terminal and leaves one half-erased route tag behind.' },
+        { minute: 40, successDescription: 'You reconstruct the hidden shipment path before the scrub completes.', failureDescription: 'The scrub finishes first and forces you to work from fragments and rumor.' },
+      ],
+    },
     create: {
       id: 'opp-quest-pigeon95-secret',
       title: 'Pigeon95 Secret',
       description:
         'The shipment trail leads to Fulfilment Core. Trace the tampered manifests before they disappear.',
+      acceptedDescription:
+        'Fulfilment Core is running hot and somebody is already cleaning the trail. Move fast enough to catch the lie before it is rewritten behind you.',
       kind: 'QUEST',
       postedByType: 'FACTION',
       postedById: coilUnion.id,
@@ -1268,6 +1358,10 @@ async function main() {
         { type: 'FACTION_REPUTATION', factionId: coilUnion.id, value: 8 },
       ],
       risks: [],
+      timelineEvents: [
+        { minute: 12, description: 'A manifest cluster vanishes from the terminal and leaves one half-erased route tag behind.' },
+        { minute: 40, successDescription: 'You reconstruct the hidden shipment path before the scrub completes.', failureDescription: 'The scrub finishes first and forces you to work from fragments and rumor.' },
+      ],
       possibleEventIds: [],
       questData: {
         chainId: 'chain-antrolus-onboarding',

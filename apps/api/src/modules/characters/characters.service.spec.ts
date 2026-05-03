@@ -1,6 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
 import { CharactersService } from './characters.service';
 
+function makeOpportunitiesMock() {
+  return {
+    interruptActiveRest: jest.fn(),
+    startRestActivity: jest.fn(),
+  };
+}
+
 function makePrismaMock() {
   return {
     character: {
@@ -70,17 +77,20 @@ const destinationDistrict = {
 
 describe('CharactersService travel restrictions', () => {
   let prisma: ReturnType<typeof makePrismaMock>;
+  let opportunities: ReturnType<typeof makeOpportunitiesMock>;
   let service: CharactersService;
 
   beforeEach(() => {
     prisma = makePrismaMock();
-    service = new CharactersService(prisma as never);
+    opportunities = makeOpportunitiesMock();
+    service = new CharactersService(prisma as never, opportunities as never);
 
     prisma.character.findUnique.mockResolvedValue(baseCharacter);
     prisma.planet.findUnique.mockResolvedValue(destinationPlanet);
     prisma.district.findUnique.mockResolvedValue(destinationDistrict);
     prisma.relationship.findFirst.mockResolvedValue(null);
     prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    opportunities.interruptActiveRest.mockResolvedValue(null);
   });
 
   it('marks travel quotes as blocked while a gig is in progress', async () => {

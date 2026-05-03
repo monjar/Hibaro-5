@@ -7,7 +7,9 @@
       "Bash(npx jest *)",
       "Bash(npm run *)",
       "Bash(npx prettier *)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(git filter-branch -f --env-filter ' *)",
+      "Bash(awk '{print $1}')"
     ]
   }
 }

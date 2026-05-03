@@ -7,6 +7,7 @@ export interface SessionPlayer {
   id: string;
   username: string;
   email?: string | null;
+  isAdmin: boolean;
   character?: { id: string; name: string; [k: string]: unknown } | null;
 }
 

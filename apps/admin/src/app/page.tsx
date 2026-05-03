@@ -1,16 +1,16 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import {
   REALTIME_EVENT_CONTRACTS,
-  createApiClient,
   type CorporationMarketState,
   type DistrictControlState,
   type NpcActivityEntry,
   type SimulationTickSummary,
   type WorldState,
 } from '@heliora/platform-sdk';
-
-const api = createApiClient({
-  baseUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000',
-});
+import { AdminShell } from '../components/AdminShell';
+import { adminApi } from '../lib/api';
 
 function formatMoney(value: number | null | undefined) {
   if (value == null) return '—';
@@ -21,57 +21,72 @@ function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
-export default async function AdminPage() {
-  const [worldState, history] = await Promise.all([
-    api.getWorldState().catch(() => null as WorldState | null),
-    api.getSimulationHistory(8).catch(() => [] as SimulationTickSummary[]),
-  ]);
+export default function AdminPage() {
+  const [worldState, setWorldState] = useState<WorldState | null>(null);
+  const [history, setHistory] = useState<SimulationTickSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const [nextWorldState, nextHistory] = await Promise.all([
+          adminApi.getWorldState(),
+          adminApi.getSimulationHistory(8),
+        ]);
+        if (!cancelled) {
+          setWorldState(nextWorldState);
+          setHistory(nextHistory);
+        }
+      } catch {
+        if (!cancelled) {
+          setWorldState(null);
+          setHistory([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <AdminShell title="Hibaro-5 simulation overview" blurb="Loading world-state telemetry…">
+        <div className="rounded border border-heliora-border bg-heliora-panel p-6 text-heliora-text-dim">
+          Loading world-state telemetry…
+        </div>
+      </AdminShell>
+    );
+  }
 
   if (!worldState) {
     return (
-      <main className="min-h-screen bg-heliora-dark text-heliora-text p-8">
-        <div className="max-w-4xl mx-auto rounded border border-heliora-red/40 bg-heliora-panel p-6">
+      <AdminShell title="Hibaro-5 simulation overview" blurb="Simulation control plane status.">
+        <div className="rounded border border-heliora-red/40 bg-heliora-panel p-6">
           <h1 className="text-2xl font-bold text-heliora-red">Heliora Admin unavailable</h1>
           <p className="mt-3 text-heliora-text-dim">
             Start the API at {process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'} to inspect
             the world-state engine.
           </p>
         </div>
-      </main>
+      </AdminShell>
     );
   }
 
   return (
-    <main className="min-h-screen bg-heliora-dark text-heliora-text">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8">
-        <header className="rounded border border-heliora-border bg-heliora-panel p-6">
-          <p className="text-sm uppercase tracking-[0.3em] text-heliora-cyan">
-            Heliora Admin Control Plane
-          </p>
-          <h1 className="mt-2 text-3xl font-bold">Hibaro-5 simulation overview</h1>
-          <p className="mt-3 max-w-3xl text-sm text-heliora-text-dim">
-            Inspect economy drift, corporation volatility, district control pressure, NPC actions,
-            and the shared realtime contracts that future transports must honor.
-          </p>
-          <nav className="mt-4 flex flex-wrap gap-2">
-            {[
-              { href: '/opportunities', label: 'OPPORTUNITIES' },
-              { href: '/locations', label: 'LOCATIONS' },
-              { href: '/factions', label: 'FACTIONS' },
-              { href: '/corporations', label: 'CORPORATIONS' },
-              { href: '/world-events', label: 'WORLD EVENTS' },
-              { href: '/items', label: 'ITEMS' },
-            ].map((link) => (
-              <a
-                key={link.href}
-                href={link.href}
-                className="rounded border border-heliora-cyan/60 bg-heliora-cyan/10 px-4 py-2 text-sm font-bold text-heliora-cyan hover:bg-heliora-cyan/20"
-              >
-                {link.label} →
-              </a>
-            ))}
-          </nav>
-        </header>
+    <AdminShell
+      title="Hibaro-5 simulation overview"
+      blurb="Inspect economy drift, corporation volatility, district control pressure, NPC actions, and the shared realtime contracts that future transports must honor."
+    >
+      <div className="flex flex-col gap-6">
 
         <section className="grid gap-4 md:grid-cols-4">
           <SummaryCard label="Planets" value={worldState.planets.length} />
@@ -179,7 +194,7 @@ export default async function AdminPage() {
           </Panel>
         </section>
       </div>
-    </main>
+    </AdminShell>
   );
 }
 

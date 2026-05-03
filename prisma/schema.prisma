@@ -209,12 +209,13 @@ enum JobEmploymentStatus {
 // ==================== MODELS ====================
 
 model Player {
-  id          String   @id @default(uuid())
-  username    String   @unique
-  email       String?  @unique
+  id           String   @id @default(uuid())
+  username     String   @unique
+  email        String?  @unique
   passwordHash String
-  createdAt   DateTime @default(now())
-  lastLoginAt DateTime @default(now())
+  isAdmin      Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  lastLoginAt  DateTime @default(now())
 
   character    Character?
   activityLogs ActivityLog[]
@@ -427,6 +428,7 @@ model OpportunityDefinition {
   id                String                  @id @default(uuid())
   title             String
   description       String?
+  acceptedDescription String?
   kind              OpportunityKind
   postedByType      OpportunityPostedByType @default(SYSTEM)
   postedById        String?
@@ -436,6 +438,7 @@ model OpportunityDefinition {
   difficulty        Int                     @default(1)
   rewards           Json                    @default("[]")
   risks             Json                    @default("[]")
+  timelineEvents    Json                    @default("[]")
   possibleEventIds  Json                    @default("[]")
   repeatability     Json?
   questData         Json?

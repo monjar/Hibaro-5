@@ -14,6 +14,7 @@ import type {
 import { adminApi } from '../../lib/api';
 import {
   AdminShell,
+  JsonField,
   SelectField,
   StatusMessage,
   TextField,
@@ -121,6 +122,7 @@ type StructuredObjective = Record<string, unknown>;
 const empty: AdminOpportunityInput = {
   title: '',
   description: '',
+  acceptedDescription: '',
   kind: 'GIG',
   type: 'DELIVERY',
   difficulty: 10,
@@ -128,6 +130,7 @@ const empty: AdminOpportunityInput = {
   requirements: [],
   rewards: [{ type: 'CREDITS', value: 100 }],
   risks: [],
+  timelineEvents: [],
   possibleEventIds: [],
   repeatability: null,
   questData: null,
@@ -188,6 +191,7 @@ export default function AdminOpportunitiesPage() {
     setEditing({
       title: opp.title,
       description: opp.description ?? '',
+      acceptedDescription: opp.acceptedDescription ?? '',
       kind: opp.kind,
       type: opp.type,
       difficulty: opp.difficulty,
@@ -195,6 +199,7 @@ export default function AdminOpportunitiesPage() {
       requirements: opp.requirements,
       rewards: opp.rewards,
       risks: opp.risks,
+      timelineEvents: opp.timelineEvents ?? [],
       possibleEventIds: opp.possibleEventIds ?? [],
       repeatability: opp.repeatability,
       questData: opp.questData ?? null,
@@ -287,6 +292,7 @@ export default function AdminOpportunitiesPage() {
     : [];
   const rewards = Array.isArray(editing?.rewards) ? (editing?.rewards as StructuredReward[]) : [];
   const risks = Array.isArray(editing?.risks) ? (editing?.risks as StructuredRisk[]) : [];
+  const timelineEvents = Array.isArray(editing?.timelineEvents) ? editing.timelineEvents : [];
   const linkedEventIds = Array.isArray(editing?.possibleEventIds)
     ? editing.possibleEventIds
     : [];
@@ -742,7 +748,33 @@ export default function AdminOpportunitiesPage() {
                     value={editing.description ?? ''}
                     onChange={(value) => update('description', value)}
                   />
+                  <TextField
+                    label="Accepted detail"
+                    span={2}
+                    textarea
+                    rows={4}
+                    value={editing.acceptedDescription ?? ''}
+                    onChange={(value) => update('acceptedDescription', value)}
+                  />
                 </div>
+              </section>
+
+              <section className="rounded border border-heliora-border/70 bg-heliora-dark/40 p-4">
+                <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-heliora-cyan">
+                  Active Narrative Timeline
+                </h3>
+                <p className="mb-3 text-[11px] text-heliora-text-dim">
+                  Timeline entries unlock on the active dashboard after acceptance. Use
+                  `description` for universal beats and `successDescription` or
+                  `failureDescription` for the branch that matches the pre-rolled outcome.
+                </p>
+                <JsonField
+                  label="Timeline events"
+                  value={timelineEvents}
+                  onChange={(value) => update('timelineEvents', Array.isArray(value) ? value : [])}
+                  example='[{"minute":4,"description":"A courier pauses under a dead streetlight."},{"minute":9,"successDescription":"Following the courier leads you to a sealed service hatch.","failureDescription":"The courier disappears into a false wall before you can close in."}]'
+                  rows={7}
+                />
               </section>
 
               <section className="rounded border border-heliora-border/70 bg-heliora-dark/40 p-4">
@@ -1965,6 +1997,10 @@ export default function AdminOpportunitiesPage() {
                       {linkedEventIds.length === 0 && <li>• None</li>}
                     </ul>
                   </div>
+                  <div>
+                    <div className="uppercase tracking-wider">Timeline beats</div>
+                    <div className="mt-1">{timelineEvents.length} authored beat(s)</div>
+                  </div>
                 </div>
               </section>
             </aside>
@@ -2019,7 +2055,7 @@ export default function AdminOpportunitiesPage() {
                       : 'always on'}
                 </td>
                 <td className="py-2 text-xs text-heliora-text-dim">
-                  {opp.durationMinutes ?? '-'}m · {opp.requirements.length} req · {opp.rewards.length} rewards · {opp.risks.length} risks
+                  {opp.durationMinutes ?? '-'}m · {opp.requirements.length} req · {opp.rewards.length} rewards · {opp.risks.length} risks · {(opp.timelineEvents ?? []).length} beats
                 </td>
                 <td className="py-2 text-right">
                   <button

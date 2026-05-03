@@ -68,6 +68,12 @@ export class CharactersController {
     return this.charactersService.rest(id, player.sub);
   }
 
+  @Post(':id/rest/stop')
+  @ApiOperation({ summary: 'Stop an active rest session and keep the recovery earned so far' })
+  stopRest(@Param('id') id: string, @CurrentPlayer() player: AuthenticatedPlayer) {
+    return this.charactersService.stopRest(id, player.sub);
+  }
+
   @Post(':id/items/:itemInstanceId/use')
   @ApiOperation({ summary: 'Consume an item from inventory' })
   useItem(

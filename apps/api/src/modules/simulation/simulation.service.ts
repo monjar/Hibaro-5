@@ -3,7 +3,7 @@ import { Prisma, RelationshipType } from '@prisma/client';
 import { REALTIME_EVENT_CONTRACTS } from '@heliora/platform-sdk';
 import { computeNextStockPrice } from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
-import { OpportunitiesService } from '../opportunities/opportunities.service';
+import { OpportunitiesService, REST_OPPORTUNITY_ID } from '../opportunities/opportunities.service';
 import { JobsService } from '../jobs/jobs.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { clampWorldMetric, deriveCorporationStatus } from './simulation.utils';
@@ -523,11 +523,20 @@ export class SimulationService {
 
   private async applyEnergyDecay(now: Date) {
     const threshold = new Date(now.getTime() - ENERGY_DECAY_INTERVAL_MS);
+    const restingInstances = await this.prisma.opportunityInstance.findMany({
+      where: {
+        definitionId: REST_OPPORTUNITY_ID,
+        status: { in: ['ACCEPTED', 'IN_PROGRESS'] },
+      },
+      select: { characterId: true },
+    });
+    const restingCharacterIds = restingInstances.map((instance) => instance.characterId);
     const characters = await this.prisma.character.findMany({
       where: {
         type: 'PLAYER',
         energy: { gt: 0 },
         lastEnergyDecayAt: { lte: threshold },
+        ...(restingCharacterIds.length > 0 ? { id: { notIn: restingCharacterIds } } : {}),
       },
       select: { id: true, energy: true, maxEnergy: true, lastEnergyDecayAt: true },
     });

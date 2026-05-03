@@ -22,10 +22,12 @@ import { JobsService } from '../jobs/jobs.service';
 
 const STAT_XP_GAIN_PROBABILITY = 0.5;
 const DEFAULT_RISK_PROBABILITY = 0.3;
+export const REST_OPPORTUNITY_ID = 'system-rest-cycle';
 
 export interface AdminOpportunityInput {
   title: string;
   description?: string | null;
+  acceptedDescription?: string | null;
   kind: 'GIG' | 'JOB' | 'QUEST';
   type: string;
   difficulty?: number;
@@ -33,6 +35,7 @@ export interface AdminOpportunityInput {
   requirements?: unknown[];
   rewards?: unknown[];
   risks?: unknown[];
+  timelineEvents?: OpportunityTimelineEvent[];
   possibleEventIds?: string[];
   repeatability?: unknown;
   questData?: QuestDataEntry | null;
@@ -50,6 +53,45 @@ type QuestDataEntry = {
   objectives?: Array<Record<string, unknown>>;
 };
 
+type OpportunityTimelineEvent = {
+  minute: number;
+  description?: string;
+  successDescription?: string;
+  failureDescription?: string;
+};
+
+type PlannedOutcome = {
+  success: boolean;
+  roll: number;
+  successChance: number;
+  checkTotal: number;
+  difficultyClass: number;
+  statModifier: number;
+  relevantStatTotal: number;
+  checkLabel: string;
+};
+
+type OpportunityProgress = {
+  plannedOutcome?: PlannedOutcome;
+  rest?: RestProgress;
+};
+
+type RestProfileInput = {
+  buildingId: string;
+  buildingName: string;
+  energyPerMinute: number;
+  healthPerMinute: number;
+  costPerMinute: number;
+  wantedReductionPerMinute: number;
+};
+
+type RestProgress = RestProfileInput & {
+  durationMinutes: number;
+  targetEnergy: number;
+  targetHealth: number;
+  targetWantedLevel: number;
+};
+
 @Injectable()
 export class OpportunitiesService {
   constructor(
@@ -58,7 +100,10 @@ export class OpportunitiesService {
   ) {}
 
   async findAll() {
-    return this.prisma.opportunityDefinition.findMany({ orderBy: { createdAt: 'desc' } });
+    const definitions = await this.prisma.opportunityDefinition.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+    return definitions.filter((definition) => !this.isHiddenSystemOpportunity(definition));
   }
 
   async findOne(id: string) {
@@ -74,6 +119,7 @@ export class OpportunitiesService {
       data: {
         title: data.title,
         description: data.description ?? null,
+        acceptedDescription: data.acceptedDescription ?? null,
         kind: data.kind,
         type: data.type as OpportunityType,
         difficulty: data.difficulty ?? 10,
@@ -81,6 +127,7 @@ export class OpportunitiesService {
         requirements: (data.requirements ?? []) as never,
         rewards: (data.rewards ?? []) as never,
         risks: (data.risks ?? []) as never,
+        timelineEvents: this.readTimelineEvents(data.timelineEvents) as never,
         possibleEventIds: (data.possibleEventIds ?? []) as never,
         repeatability: (data.repeatability ?? null) as never,
         questData: (data.questData ?? null) as never,
@@ -103,6 +150,9 @@ export class OpportunitiesService {
       data: {
         ...(data.title !== undefined ? { title: data.title } : {}),
         ...(data.description !== undefined ? { description: data.description } : {}),
+        ...(data.acceptedDescription !== undefined
+          ? { acceptedDescription: data.acceptedDescription }
+          : {}),
         ...(data.kind !== undefined ? { kind: data.kind } : {}),
         ...(data.type !== undefined ? { type: data.type as OpportunityType } : {}),
         ...(data.difficulty !== undefined ? { difficulty: data.difficulty } : {}),
@@ -112,6 +162,9 @@ export class OpportunitiesService {
           : {}),
         ...(data.rewards !== undefined ? { rewards: data.rewards as never } : {}),
         ...(data.risks !== undefined ? { risks: data.risks as never } : {}),
+        ...(data.timelineEvents !== undefined
+          ? { timelineEvents: this.readTimelineEvents(data.timelineEvents) as never }
+          : {}),
         ...(data.possibleEventIds !== undefined
           ? { possibleEventIds: (data.possibleEventIds ?? []) as never }
           : {}),
@@ -136,6 +189,9 @@ export class OpportunitiesService {
   }
 
   async deleteDefinition(id: string) {
+    if (id === REST_OPPORTUNITY_ID) {
+      throw new BadRequestException('The system rest activity cannot be deleted');
+    }
     await this.findOne(id);
     const inFlight = await this.prisma.opportunityInstance.count({
       where: { definitionId: id, status: { in: ['IN_PROGRESS', 'ACCEPTED'] } },
@@ -164,6 +220,7 @@ export class OpportunitiesService {
     if (input.durationMinutes !== undefined && input.durationMinutes < 1) {
       throw new BadRequestException('durationMinutes must be at least 1');
     }
+    this.readTimelineEvents(input.timelineEvents);
     if (input.startsAvailableAt && Number.isNaN(new Date(input.startsAvailableAt).getTime())) {
       throw new BadRequestException('startsAvailableAt must be a valid ISO datetime');
     }
@@ -233,6 +290,7 @@ export class OpportunitiesService {
     const characterStats = this.toCharacterStats(character);
 
     return all.filter((opp) => {
+      if (this.isHiddenSystemOpportunity(opp)) return false;
       if (inProgressIds.has(opp.id)) return false;
       if (this.isOneOffQuestCompleted(opp, completedQuestIds)) return false;
       if (!this.isQuestUnlocked(opp, completedQuestIds, unlockSources)) return false;
@@ -278,11 +336,30 @@ export class OpportunitiesService {
       include: { definition: { select: { title: true } } },
     });
     if (activeAny) {
-      if (activeAny.definitionId === opportunityId) {
+      if (activeAny.definitionId === REST_OPPORTUNITY_ID) {
+        await this.interruptActiveRest(characterId, playerId, 'opportunity');
+      } else if (activeAny.definitionId === opportunityId) {
+        throw new BadRequestException('Opportunity already in progress');
+      } else {
+        throw new BadRequestException(
+          `You already have an activity in progress: ${activeAny.definition.title}. Finish or fail it before accepting another.`,
+        );
+      }
+    }
+
+    const activeAfterRestInterrupt = await this.prisma.opportunityInstance.findFirst({
+      where: {
+        characterId,
+        status: { in: ['IN_PROGRESS', 'ACCEPTED'] },
+      },
+      include: { definition: { select: { title: true } } },
+    });
+    if (activeAfterRestInterrupt) {
+      if (activeAfterRestInterrupt.definitionId === opportunityId) {
         throw new BadRequestException('Opportunity already in progress');
       }
       throw new BadRequestException(
-        `You already have an activity in progress: ${activeAny.definition.title}. Finish or fail it before accepting another.`,
+        `You already have an activity in progress: ${activeAfterRestInterrupt.definition.title}. Finish or fail it before accepting another.`,
       );
     }
 
@@ -330,6 +407,7 @@ export class OpportunitiesService {
     const completesAt = definition.durationMinutes
       ? new Date(now.getTime() + definition.durationMinutes * 60 * 1000)
       : new Date(now.getTime() + 60 * 60 * 1000);
+    const plannedOutcome = this.planOutcome(character, definition);
 
     const instance = await this.prisma.opportunityInstance.create({
       data: {
@@ -338,6 +416,7 @@ export class OpportunitiesService {
         status: 'IN_PROGRESS',
         startedAt: now,
         completesAt,
+        progress: { plannedOutcome } as never,
       },
       include: { definition: true },
     });
@@ -370,6 +449,9 @@ export class OpportunitiesService {
     if (instance.status === 'COMPLETED' || instance.status === 'FAILED') {
       throw new BadRequestException(`Instance already ${instance.status}`);
     }
+    if (new Date(instance.completesAt).getTime() > Date.now()) {
+      throw new BadRequestException('This activity is still in progress');
+    }
 
     return this.resolveInstanceInternal(instance);
   }
@@ -377,6 +459,11 @@ export class OpportunitiesService {
   async resolveInstanceInternal(instance: any) {
     const { definition, character } = instance;
     const now = new Date();
+
+    if (this.isRestDefinitionId(definition.id)) {
+      return this.resolveRestInstanceInternal(instance, now, false);
+    }
+
     const relationshipChanges: Array<{
       targetType: string;
       targetId: string;
@@ -386,8 +473,20 @@ export class OpportunitiesService {
 
     const rulesCharacter = this.toCharacterStats(character);
     const rulesDefinition = this.toGameRulesOpportunity(definition);
-    const successChance = calculateOpportunitySuccessChance(rulesCharacter, rulesDefinition);
-    const check = rollOpportunityCheck(rulesCharacter, rulesDefinition);
+    const plannedOutcome = this.readPlannedOutcome(instance.progress);
+    const successChance =
+      plannedOutcome?.successChance ??
+      calculateOpportunitySuccessChance(rulesCharacter, rulesDefinition);
+    const check = plannedOutcome
+      ? {
+          success: plannedOutcome.success,
+          d20Roll: plannedOutcome.roll,
+          checkTotal: plannedOutcome.checkTotal,
+          difficultyClass: plannedOutcome.difficultyClass,
+          statModifier: plannedOutcome.statModifier,
+          relevantStatTotal: plannedOutcome.relevantStatTotal,
+        }
+      : rollOpportunityCheck(rulesCharacter, rulesDefinition);
     const checkProfile = getOpportunityCheckProfile(rulesCharacter, rulesDefinition);
     const success = check.success;
 
@@ -558,6 +657,20 @@ export class OpportunitiesService {
       data: {
         status: success ? 'COMPLETED' : 'FAILED',
         completedAt: now,
+        progress: {
+          ...(this.readProgress(instance.progress) ?? {}),
+          plannedOutcome:
+            plannedOutcome ?? {
+              success,
+              roll: check.d20Roll,
+              successChance: Math.round(successChance * 100) / 100,
+              checkTotal: check.checkTotal,
+              difficultyClass: check.difficultyClass,
+              statModifier: Number(check.statModifier.toFixed(1)),
+              relevantStatTotal: check.relevantStatTotal,
+              checkLabel: checkProfile.label,
+            },
+        } as never,
         outcome,
       },
       include: { definition: true },
@@ -589,6 +702,390 @@ export class OpportunitiesService {
     }
 
     return updatedInstance;
+  }
+
+  async startRestActivity(
+    character: {
+      id: string;
+      name: string;
+      playerId?: string | null;
+      credits: number;
+      energy: number;
+      maxEnergy: number;
+      health: number;
+      maxHealth: number;
+      wantedLevel: number;
+    },
+    profile: RestProfileInput,
+  ) {
+    const existing = await this.prisma.opportunityInstance.findFirst({
+      where: {
+        characterId: character.id,
+        definitionId: REST_OPPORTUNITY_ID,
+        status: { in: ['IN_PROGRESS', 'ACCEPTED'] },
+      },
+      include: { definition: true },
+    });
+    if (existing) {
+      return existing;
+    }
+
+    const activeOther = await this.prisma.opportunityInstance.findFirst({
+      where: {
+        characterId: character.id,
+        status: { in: ['IN_PROGRESS', 'ACCEPTED'] },
+      },
+      include: { definition: { select: { title: true } } },
+    });
+    if (activeOther) {
+      throw new BadRequestException(
+        `You already have an activity in progress: ${activeOther.definition.title}. Finish it before resting.`,
+      );
+    }
+
+    const energyMinutes =
+      profile.energyPerMinute > 0
+        ? Math.ceil(Math.max(0, character.maxEnergy - character.energy) / profile.energyPerMinute)
+        : 0;
+    const healthMinutes =
+      profile.healthPerMinute > 0
+        ? Math.ceil(Math.max(0, character.maxHealth - character.health) / profile.healthPerMinute)
+        : 0;
+    const wantedMinutes =
+      profile.wantedReductionPerMinute > 0
+        ? Math.ceil(character.wantedLevel / profile.wantedReductionPerMinute)
+        : 0;
+    const durationMinutes = Math.max(energyMinutes, healthMinutes, wantedMinutes);
+
+    if (durationMinutes <= 0) {
+      throw new BadRequestException('You are already fully rested here');
+    }
+
+    const estimatedCost = this.roundCredits(durationMinutes * profile.costPerMinute);
+    if (character.credits < estimatedCost) {
+      throw new BadRequestException(
+        `A full rest here can cost up to ${estimatedCost} credits (you have ${character.credits})`,
+      );
+    }
+
+    await this.ensureRestDefinition();
+
+    const now = new Date();
+    const completesAt = new Date(now.getTime() + durationMinutes * 60 * 1000);
+    const progress: OpportunityProgress = {
+      rest: {
+        ...profile,
+        durationMinutes,
+        targetEnergy: character.maxEnergy,
+        targetHealth: character.maxHealth,
+        targetWantedLevel: 0,
+      },
+    };
+
+    const instance = await this.prisma.opportunityInstance.create({
+      data: {
+        definitionId: REST_OPPORTUNITY_ID,
+        characterId: character.id,
+        status: 'IN_PROGRESS',
+        startedAt: now,
+        completesAt,
+        progress: progress as never,
+      },
+      include: { definition: true },
+    });
+
+    if (character.playerId) {
+      await this.prisma.activityLog.create({
+        data: {
+          playerId: character.playerId,
+          characterId: character.id,
+          type: 'BUILDING_ENTERED',
+          message: `${character.name} started resting at ${profile.buildingName}`,
+          relatedEntities: {
+            buildingId: profile.buildingId,
+            instanceId: instance.id,
+            estimatedCost,
+            durationMinutes,
+            rest: profile,
+          },
+        },
+      });
+    }
+
+    return instance;
+  }
+
+  async interruptActiveRest(characterId: string, playerId: string, reason = 'manual') {
+    const instance = await this.prisma.opportunityInstance.findFirst({
+      where: {
+        characterId,
+        definitionId: REST_OPPORTUNITY_ID,
+        status: { in: ['IN_PROGRESS', 'ACCEPTED'] },
+      },
+      include: { definition: true, character: true },
+    });
+
+    if (!instance) {
+      return null;
+    }
+    if (instance.character.playerId !== playerId) {
+      throw new ForbiddenException('You can only stop rest for your own character');
+    }
+
+    return this.resolveRestInstanceInternal(instance, new Date(), true, reason);
+  }
+
+  private readTimelineEvents(value: unknown): OpportunityTimelineEvent[] {
+    if (value == null) {
+      return [];
+    }
+    if (!Array.isArray(value)) {
+      throw new BadRequestException('timelineEvents must be an array');
+    }
+
+    return value.map((entry, index) => {
+      if (!entry || typeof entry !== 'object') {
+        throw new BadRequestException(`timelineEvents[${index}] must be an object`);
+      }
+      const record = entry as Record<string, unknown>;
+      if (typeof record.minute !== 'number' || !Number.isFinite(record.minute) || record.minute < 0) {
+        throw new BadRequestException(`timelineEvents[${index}].minute must be a non-negative number`);
+      }
+
+      const description =
+        typeof record.description === 'string' && record.description.trim().length > 0
+          ? record.description.trim()
+          : undefined;
+      const successDescription =
+        typeof record.successDescription === 'string' &&
+        record.successDescription.trim().length > 0
+          ? record.successDescription.trim()
+          : undefined;
+      const failureDescription =
+        typeof record.failureDescription === 'string' &&
+        record.failureDescription.trim().length > 0
+          ? record.failureDescription.trim()
+          : undefined;
+
+      if (!description && !successDescription && !failureDescription) {
+        throw new BadRequestException(
+          `timelineEvents[${index}] must include description, successDescription, or failureDescription`,
+        );
+      }
+
+      return {
+        minute: record.minute,
+        ...(description ? { description } : {}),
+        ...(successDescription ? { successDescription } : {}),
+        ...(failureDescription ? { failureDescription } : {}),
+      };
+    });
+  }
+
+  private async ensureRestDefinition() {
+    await this.prisma.opportunityDefinition.upsert({
+      where: { id: REST_OPPORTUNITY_ID },
+      update: {
+        title: 'Recovery Cycle',
+        description: 'Pull back, breathe, and let the minutes recover what they can.',
+        acceptedDescription:
+          'Recovery is underway. You can stop at any time and keep the energy and health regained so far.',
+        kind: 'GIG',
+        type: 'WORLD',
+        difficulty: 8,
+        durationMinutes: 1,
+        rewards: [] as never,
+        risks: [] as never,
+        timelineEvents: [
+          { minute: 1, description: 'Your breathing steadies as the rush starts to leave your body.' },
+          { minute: 5, description: 'Fatigue starts to lift and the background noise fades.' },
+          { minute: 10, description: 'Your pulse evens out and your focus returns in full.' },
+        ] as never,
+        repeatability: { hiddenFromBoard: true, systemActivity: 'REST' } as never,
+      },
+      create: {
+        id: REST_OPPORTUNITY_ID,
+        title: 'Recovery Cycle',
+        description: 'Pull back, breathe, and let the minutes recover what they can.',
+        acceptedDescription:
+          'Recovery is underway. You can stop at any time and keep the energy and health regained so far.',
+        kind: 'GIG',
+        postedByType: 'SYSTEM',
+        type: 'WORLD',
+        requirements: [] as never,
+        durationMinutes: 1,
+        difficulty: 8,
+        rewards: [] as never,
+        risks: [] as never,
+        timelineEvents: [
+          { minute: 1, description: 'Your breathing steadies as the rush starts to leave your body.' },
+          { minute: 5, description: 'Fatigue starts to lift and the background noise fades.' },
+          { minute: 10, description: 'Your pulse evens out and your focus returns in full.' },
+        ] as never,
+        possibleEventIds: [] as never,
+        repeatability: { hiddenFromBoard: true, systemActivity: 'REST' } as never,
+      },
+    });
+  }
+
+  private isRestDefinitionId(definitionId: string) {
+    return definitionId === REST_OPPORTUNITY_ID;
+  }
+
+  private isHiddenSystemOpportunity(definition: { id: string; repeatability?: unknown }) {
+    if (definition.id === REST_OPPORTUNITY_ID) {
+      return true;
+    }
+    if (!definition.repeatability || typeof definition.repeatability !== 'object') {
+      return false;
+    }
+    const repeatability = definition.repeatability as Record<string, unknown>;
+    return Boolean(repeatability.hiddenFromBoard);
+  }
+
+  private async resolveRestInstanceInternal(
+    instance: any,
+    finishedAt: Date,
+    interrupted: boolean,
+    reason?: string,
+  ) {
+    const rest = this.readProgress(instance.progress)?.rest;
+    if (!rest) {
+      throw new BadRequestException('Rest progress is missing recovery settings');
+    }
+
+    const totalMinutes = Math.max(1, rest.durationMinutes);
+    const elapsedMs = Math.max(0, finishedAt.getTime() - new Date(instance.startedAt).getTime());
+    const elapsedMinutes = interrupted
+      ? Math.min(totalMinutes, Math.floor(elapsedMs / 60_000))
+      : totalMinutes;
+    const billableMinutes = Math.max(0, elapsedMinutes);
+    const energyRecovered = Math.min(
+      Math.max(0, rest.targetEnergy - instance.character.energy),
+      Math.floor(billableMinutes * rest.energyPerMinute),
+    );
+    const healthRecovered = Math.min(
+      Math.max(0, rest.targetHealth - instance.character.health),
+      Math.floor(billableMinutes * rest.healthPerMinute),
+    );
+    const wantedReduction = Math.min(
+      Math.max(0, instance.character.wantedLevel - rest.targetWantedLevel),
+      Math.floor(billableMinutes * rest.wantedReductionPerMinute),
+    );
+    const cost = this.roundCredits(billableMinutes * rest.costPerMinute);
+
+    const updatedCharacter = await this.prisma.character.update({
+      where: { id: instance.character.id },
+      data: {
+        credits: instance.character.credits - cost,
+        energy: Math.min(instance.character.maxEnergy, instance.character.energy + energyRecovered),
+        health: Math.min(instance.character.maxHealth, instance.character.health + healthRecovered),
+        wantedLevel: Math.max(0, instance.character.wantedLevel - wantedReduction),
+        ...(energyRecovered > 0 ? { lastEnergyDecayAt: finishedAt } : {}),
+      },
+    });
+
+    const outcome = {
+      success: true,
+      interrupted,
+      interruptionReason: interrupted ? reason ?? 'manual' : null,
+      minutesRested: billableMinutes,
+      energyRecovered,
+      healthRecovered,
+      cost,
+      wantedDelta: -wantedReduction,
+      buildingId: rest.buildingId,
+      buildingName: rest.buildingName,
+      resolvedAt: finishedAt.toISOString(),
+      characterLedger: {
+        before: {
+          credits: instance.character.credits,
+          health: instance.character.health,
+          energy: instance.character.energy,
+          wantedLevel: instance.character.wantedLevel,
+        },
+        after: {
+          credits: updatedCharacter.credits,
+          health: updatedCharacter.health,
+          energy: updatedCharacter.energy,
+          wantedLevel: updatedCharacter.wantedLevel,
+        },
+        delta: {
+          credits: updatedCharacter.credits - instance.character.credits,
+          health: updatedCharacter.health - instance.character.health,
+          energy: updatedCharacter.energy - instance.character.energy,
+          wantedLevel: updatedCharacter.wantedLevel - instance.character.wantedLevel,
+        },
+      },
+    };
+
+    const updatedInstance = await this.prisma.opportunityInstance.update({
+      where: { id: instance.id },
+      data: {
+        status: 'COMPLETED',
+        completedAt: finishedAt,
+        outcome,
+      },
+      include: { definition: true },
+    });
+
+    if (instance.character.playerId) {
+      await this.prisma.activityLog.create({
+        data: {
+          playerId: instance.character.playerId,
+          characterId: instance.character.id,
+          type: 'BUILDING_ENTERED',
+          message: interrupted
+            ? `${instance.character.name} stopped resting at ${rest.buildingName} after ${billableMinutes}m (+${energyRecovered} EN, +${healthRecovered} HP)`
+            : `${instance.character.name} finished resting at ${rest.buildingName} (+${energyRecovered} EN, +${healthRecovered} HP)`,
+          relatedEntities: {
+            instanceId: instance.id,
+            buildingId: rest.buildingId,
+            outcome,
+          },
+        },
+      });
+    }
+
+    return updatedInstance;
+  }
+
+  private roundCredits(value: number) {
+    return Number(value.toFixed(2));
+  }
+
+  private planOutcome(character: any, definition: any): PlannedOutcome {
+    const rulesCharacter = this.toCharacterStats(character);
+    const rulesDefinition = this.toGameRulesOpportunity(definition);
+    const successChance = calculateOpportunitySuccessChance(rulesCharacter, rulesDefinition);
+    const check = rollOpportunityCheck(rulesCharacter, rulesDefinition);
+    const checkProfile = getOpportunityCheckProfile(rulesCharacter, rulesDefinition);
+
+    return {
+      success: check.success,
+      roll: check.d20Roll,
+      successChance: Math.round(successChance * 100) / 100,
+      checkTotal: check.checkTotal,
+      difficultyClass: check.difficultyClass,
+      statModifier: Number(check.statModifier.toFixed(1)),
+      relevantStatTotal: check.relevantStatTotal,
+      checkLabel: checkProfile.label,
+    };
+  }
+
+  private readProgress(progress: unknown): OpportunityProgress | null {
+    if (!progress || typeof progress !== 'object' || Array.isArray(progress)) {
+      return null;
+    }
+    return progress as OpportunityProgress;
+  }
+
+  private readPlannedOutcome(progress: unknown): PlannedOutcome | null {
+    const parsed = this.readProgress(progress);
+    if (!parsed?.plannedOutcome || typeof parsed.plannedOutcome !== 'object') {
+      return null;
+    }
+    return parsed.plannedOutcome;
   }
 
   private acceptActivityType(kind: string): ActivityType {
