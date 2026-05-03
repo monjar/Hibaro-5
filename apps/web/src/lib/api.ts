@@ -1,5 +1,5 @@
 import { createApiClient } from '@heliora/platform-sdk';
-import { readToken } from './session';
+import { clearSession, readToken } from './session';
 
 export * from '@heliora/platform-sdk';
 
@@ -9,6 +9,7 @@ const baseUrl =
 export const api = createApiClient({
   baseUrl,
   getToken: readToken,
+  onUnauthorized: clearSession,
 });
 
 export const apiFetch = api.request;

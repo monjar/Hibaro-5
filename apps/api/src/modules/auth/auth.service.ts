@@ -19,12 +19,14 @@ import { RegisterDto } from './dto/register.dto';
 export interface AuthenticatedPlayer {
   sub: string;
   username: string;
+  isAdmin: boolean;
 }
 
 type SafePlayer = {
   id: string;
   username: string;
   email: string | null;
+  isAdmin: boolean;
   createdAt: Date;
   lastLoginAt: Date;
   character: {
@@ -215,6 +217,7 @@ export class AuthService {
     username: string;
     passwordHash: string;
     email: string | null;
+    isAdmin: boolean;
     createdAt: Date;
     lastLoginAt: Date;
     character: SafePlayer['character'];
@@ -222,6 +225,7 @@ export class AuthService {
     const accessToken = await this.jwtService.signAsync({
       sub: player.id,
       username: player.username,
+      isAdmin: player.isAdmin,
     });
 
     return {
@@ -235,6 +239,7 @@ export class AuthService {
     username: string;
     passwordHash: string;
     email: string | null;
+    isAdmin: boolean;
     createdAt: Date;
     lastLoginAt: Date;
     character: SafePlayer['character'];

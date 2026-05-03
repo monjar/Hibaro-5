@@ -7,10 +7,14 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { assessTravel } from './travel.utils';
+import { OpportunitiesService, REST_OPPORTUNITY_ID } from '../opportunities/opportunities.service';
 
 @Injectable()
 export class CharactersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private opportunitiesService: OpportunitiesService,
+  ) {}
 
   private async getActiveTravelBlock(characterId: string) {
     const activeOpportunity = await this.prisma.opportunityInstance.findFirst({
@@ -29,6 +33,10 @@ export class CharactersService {
     });
 
     if (!activeOpportunity) {
+      return null;
+    }
+
+    if (activeOpportunity.definitionId === REST_OPPORTUNITY_ID) {
       return null;
     }
 
@@ -289,60 +297,23 @@ export class CharactersService {
     const isClinic = fnArr.includes('CLINIC');
     const isSafehouse = fnArr.includes('SAFEHOUSE');
 
-    const energyRecover = isSafehouse ? 60 : isClinic ? 30 : 25;
-    const healthRecover = isClinic ? 60 : isSafehouse ? 25 : 10;
-    const cost = isClinic ? 80 : isSafehouse ? 30 : 15;
-
-    if (character.credits < cost) {
-      throw new BadRequestException(
-        `Resting here costs ${cost} credits (you have ${character.credits})`,
-      );
-    }
-
-    const newEnergy = Math.min(character.maxEnergy, character.energy + energyRecover);
-    const newHealth = Math.min(character.maxHealth, character.health + healthRecover);
-    const newWanted = isSafehouse
-      ? Math.max(0, character.wantedLevel - 1)
-      : character.wantedLevel;
-
-    const updated = await this.prisma.character.update({
-      where: { id },
-      data: {
-        credits: character.credits - cost,
-        energy: newEnergy,
-        health: newHealth,
-        ...(newEnergy > character.energy ? { lastEnergyDecayAt: new Date() } : {}),
-        wantedLevel: newWanted,
-      },
-      include: { currentPlanet: true, currentDistrict: true, currentBuilding: true },
+    return this.opportunitiesService.startRestActivity(character, {
+      buildingId: building.id,
+      buildingName: building.name,
+      energyPerMinute: isSafehouse ? 3 : isClinic ? 1 : 1.25,
+      healthPerMinute: isClinic ? 2 : isSafehouse ? 1.25 : 0.5,
+      costPerMinute: isClinic ? 2.67 : isSafehouse ? 1.5 : 0.75,
+      wantedReductionPerMinute: isSafehouse ? 0.05 : 0,
     });
+  }
 
-    if (character.playerId) {
-      await this.prisma.activityLog.create({
-        data: {
-          playerId: character.playerId,
-          characterId: id,
-          type: 'BUILDING_ENTERED',
-          message: `${character.name} rested at ${building.name} (+${newEnergy - character.energy} EN, +${newHealth - character.health} HP)`,
-          relatedEntities: {
-            buildingId: building.id,
-            energyDelta: newEnergy - character.energy,
-            healthDelta: newHealth - character.health,
-            cost,
-            wantedDelta: newWanted - character.wantedLevel,
-          },
-        },
-      });
+  async stopRest(id: string, playerId: string) {
+    await this.findById(id, playerId);
+    const stopped = await this.opportunitiesService.interruptActiveRest(id, playerId, 'manual');
+    if (!stopped) {
+      throw new BadRequestException('No active rest session to stop');
     }
-
-    return {
-      character: updated,
-      restedAt: building.name,
-      energyRecovered: newEnergy - character.energy,
-      healthRecovered: newHealth - character.health,
-      cost,
-      wantedDelta: newWanted - character.wantedLevel,
-    };
+    return stopped;
   }
 
   async useItem(id: string, playerId: string, itemInstanceId: string) {
@@ -498,6 +469,8 @@ export class CharactersService {
         `Travel requires ${travelCost} credits (current: ${character.credits})`,
       );
     }
+
+    await this.opportunitiesService.interruptActiveRest(id, playerId, 'travel');
 
     const updated = await this.prisma.character.update({
       where: { id },

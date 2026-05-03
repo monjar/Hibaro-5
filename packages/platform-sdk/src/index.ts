@@ -63,15 +63,24 @@ export interface Player {
   id: string;
   username: string;
   email?: string;
+  isAdmin: boolean;
   createdAt: string;
   lastLoginAt: string;
   character?: Character;
+}
+
+export interface OpportunityTimelineEvent {
+  minute: number;
+  description?: string;
+  successDescription?: string;
+  failureDescription?: string;
 }
 
 export interface OpportunityDefinition {
   id: string;
   title: string;
   description?: string;
+  acceptedDescription?: string | null;
   kind: 'GIG' | 'JOB' | 'QUEST';
   type: string;
   difficulty: number;
@@ -79,6 +88,7 @@ export interface OpportunityDefinition {
   requirements: Record<string, unknown>[];
   rewards: Record<string, unknown>[];
   risks: Record<string, unknown>[];
+  timelineEvents?: OpportunityTimelineEvent[] | null;
   possibleEventIds?: string[] | null;
   repeatability?: unknown;
   questData?: {
@@ -96,6 +106,7 @@ export interface OpportunityDefinition {
 export interface AdminOpportunityInput {
   title: string;
   description?: string | null;
+  acceptedDescription?: string | null;
   kind: 'GIG' | 'JOB' | 'QUEST';
   type: string;
   difficulty?: number;
@@ -103,6 +114,7 @@ export interface AdminOpportunityInput {
   requirements?: unknown[];
   rewards?: unknown[];
   risks?: unknown[];
+  timelineEvents?: OpportunityTimelineEvent[];
   possibleEventIds?: string[];
   repeatability?: unknown;
   questData?: {
@@ -386,6 +398,8 @@ export interface OpportunityInstance {
   startedAt: string;
   completesAt: string;
   completedAt?: string;
+  progress?: Record<string, unknown>;
+  rolledEvents?: Record<string, unknown>;
   outcome?: Record<string, unknown>;
   definition: OpportunityDefinition;
 }
@@ -408,6 +422,20 @@ export interface RelationshipEntry {
   value: number;
   metadata?: unknown;
   updatedAt: string;
+}
+
+export interface AdminPlayer {
+  id: string;
+  username: string;
+  email?: string | null;
+  isAdmin: boolean;
+  createdAt: string;
+  lastLoginAt: string;
+  character?: {
+    id: string;
+    name: string;
+    [key: string]: unknown;
+  } | null;
 }
 
 export interface StockQuote {
@@ -543,6 +571,7 @@ export interface AuthResponse {
     id: string;
     username: string;
     email?: string | null;
+    isAdmin: boolean;
     character?: {
       id: string;
       name: string;
@@ -727,6 +756,7 @@ export interface ApiClientConfig {
   fetchImpl?: typeof fetch;
   getToken?: () => string | null | undefined;
   getAdminToken?: () => string | null | undefined;
+  onUnauthorized?: () => void;
 }
 
 function extractErrorMessage(payload: unknown): string {
@@ -782,6 +812,10 @@ export async function apiFetch<T>(
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      config.onUnauthorized?.();
+    }
+
     const rawError = await response.text();
     let parsedError: unknown = rawError;
 
@@ -920,6 +954,12 @@ export function createApiClient(config?: ApiClientConfig) {
     register: (input: RegisterInput) => post<AuthResponse>('/auth/register', input),
     getCharacterOptions: () => request<CharacterOptions>('/auth/character-options'),
     me: () => request<AuthResponse['player']>('/auth/me'),
+    listPlayers: () => request<AdminPlayer[]>('/players'),
+    updatePlayerAdminStatus: (id: string, isAdmin: boolean) =>
+      request<AdminPlayer>(`/players/${id}/admin`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isAdmin }),
+      }),
     // authenticated
     getCharacter: (id: string) => request<unknown>(`/characters/${id}`),
     getCharacterSummary: (id: string) => request<unknown>(`/characters/${id}/summary`),
@@ -933,6 +973,7 @@ export function createApiClient(config?: ApiClientConfig) {
       body: { planetId?: string; districtId?: string; buildingId?: string },
     ) => post<TravelQuote>(`/characters/${id}/travel/quote`, body),
     rest: (id: string) => post<unknown>(`/characters/${id}/rest`),
+    stopRest: (id: string) => post<unknown>(`/characters/${id}/rest/stop`),
     useItem: (id: string, itemInstanceId: string) =>
       post<unknown>(`/characters/${id}/items/${itemInstanceId}/use`),
     getActivity: (playerId: string, page = 1, limit = 30) =>

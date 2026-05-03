@@ -1,0 +1,9 @@
+1. Quests, jobs and gigs should have another field for a detailed description that will player can see after they have accepted the oportunity. put a placeholder hidden discription for the oppotunities that are already in the database
+
+2. each oportunity should have a list of event with timestamps that for example in minute 4 of the gig the description in the dashboard changes to "You saw a man walk down the street" then in minute 9 depending on the checks player made: "Following the man you arrive at a completely empty alley end" or "You see him slip into a solid wall, as if its a decoy"
+
+3. in the db there should be a field for players if they are admin. instead of handling the admin previligase with a random token. I should be able to just sign in as normal but have access to the admin dashboard IF my account is admin in the DB
+
+4. when token is expired, user should be forced to relogin.
+
+5. Rest is now instant. it should be that rest works like a gig but can be intrupted at any time and gives you energy per minute instead of a solid amount

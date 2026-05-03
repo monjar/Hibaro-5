@@ -17,6 +17,12 @@ import {
   formatOpportunityCheckHint,
   formatUiError,
 } from '@/lib/ui-presenters';
+import {
+  getAcceptedDescription,
+  getRestProgress,
+  getTimelineEventDescription,
+  isRestActivity,
+} from '@/lib/opportunity-activity';
 import { useRewardReferenceLookup } from '@/lib/use-reward-reference-lookup';
 import type {
   ActivityLog,
@@ -131,6 +137,20 @@ export default function HomePage() {
     }
   }
 
+  async function stopRest() {
+    if (!session.characterId) return;
+    setMessage('');
+    try {
+      await api.stopRest(session.characterId);
+      setMessage('✅ Rest interrupted');
+      await refreshAll();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setTimeout(() => setMessage(''), 5000);
+    }
+  }
+
   if (!session.ready || !session.token) {
     return <main className="max-w-7xl mx-auto px-4 py-12 text-heliora-text-dim">Loading…</main>;
   }
@@ -143,6 +163,7 @@ export default function HomePage() {
   }
 
   const inProgress = instances.filter((i) => i.status === 'IN_PROGRESS' || i.status === 'ACCEPTED');
+  const activeRest = inProgress.find((instance) => isRestActivity(instance)) ?? null;
   const recentCompleted = instances
     .filter((i) => i.status === 'COMPLETED' || i.status === 'FAILED')
     .slice(0, 5);
@@ -273,6 +294,9 @@ export default function HomePage() {
             </Link>
             <RestButton
               onComplete={() => void refreshAll()}
+              onStop={() => void stopRest()}
+              hasActiveRest={Boolean(activeRest)}
+              hasBlockingActivity={inProgress.length > 0 && !activeRest}
               canRest={buildingFunctionality.some(
                 (f) => f === 'SAFEHOUSE' || f === 'CLINIC' || f === 'HUB',
               )}
@@ -359,6 +383,10 @@ export default function HomePage() {
           <div className="space-y-3">
             {inProgress.map((inst) => {
               const isReady = new Date(inst.completesAt).getTime() <= now;
+              const isRest = isRestActivity(inst);
+              const rest = getRestProgress(inst);
+              const acceptedDescription = getAcceptedDescription(inst);
+              const timelineEvent = getTimelineEventDescription(inst, now);
               return (
                 <div
                   key={inst.id}
@@ -370,15 +398,31 @@ export default function HomePage() {
                       <span className="text-heliora-text font-mono text-sm">
                         {inst.definition.title}
                       </span>
-                      <Tooltip content={formatOpportunityCheckHint(inst.definition)}>
-                        <span className="rounded border border-heliora-border px-2 py-0.5 text-[10px] text-heliora-text-dim">
-                          DC {inst.definition.difficulty}
-                        </span>
-                      </Tooltip>
+                      {!isRest && (
+                        <Tooltip content={formatOpportunityCheckHint(inst.definition)}>
+                          <span className="rounded border border-heliora-border px-2 py-0.5 text-[10px] text-heliora-text-dim">
+                            DC {inst.definition.difficulty}
+                          </span>
+                        </Tooltip>
+                      )}
                     </div>
-                    {inst.definition.description && (
+                    {acceptedDescription && (
                       <p className="max-w-xl text-xs text-heliora-text-dim">
-                        {inst.definition.description}
+                        {acceptedDescription}
+                      </p>
+                    )}
+                    {timelineEvent && (
+                      <div className="mt-2 rounded border border-heliora-cyan/20 bg-black/10 px-3 py-2 text-xs text-heliora-text">
+                        <span className="mr-2 uppercase tracking-wider text-heliora-cyan/80">
+                          Live update
+                        </span>
+                        {timelineEvent}
+                      </div>
+                    )}
+                    {isRest && rest && (
+                      <p className="mt-2 text-[11px] text-heliora-text-dim">
+                        {rest.buildingName ?? 'Current building'} · +{rest.energyPerMinute ?? 0} EN/min
+                        {rest.healthPerMinute ? ` · +${rest.healthPerMinute} HP/min` : ''}
                       </p>
                     )}
                     {Array.isArray(inst.definition.rewards) && inst.definition.rewards.length > 0 && (
@@ -410,7 +454,14 @@ export default function HomePage() {
                       disabled={resolving === inst.id}
                       className="px-3 py-1 bg-heliora-green/20 border border-heliora-green/50 rounded text-heliora-green text-xs font-mono font-bold hover:bg-heliora-green/30 transition-colors disabled:opacity-50 ml-4 shrink-0"
                     >
-                      {resolving === inst.id ? '…' : 'RESOLVE'}
+                      {resolving === inst.id ? '…' : isRest ? 'FINISH REST' : 'RESOLVE'}
+                    </button>
+                  ) : isRest ? (
+                    <button
+                      onClick={() => void stopRest()}
+                      className="px-3 py-1 border border-heliora-yellow/50 rounded text-heliora-yellow text-xs font-mono font-bold hover:bg-heliora-yellow/10 transition-colors ml-4 shrink-0"
+                    >
+                      STOP REST
                     </button>
                   ) : (
                     <span className="px-3 py-1 text-xs text-heliora-text-dim font-mono">
@@ -505,18 +556,35 @@ export default function HomePage() {
   );
 }
 
-function RestButton({ canRest, onComplete }: { canRest: boolean; onComplete: () => void }) {
+function RestButton({
+  canRest,
+  hasActiveRest,
+  hasBlockingActivity,
+  onComplete,
+  onStop,
+}: {
+  canRest: boolean;
+  hasActiveRest: boolean;
+  hasBlockingActivity: boolean;
+  onComplete: () => void;
+  onStop: () => void;
+}) {
   const session = useAuthGuard();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  async function rest() {
+  async function runRestAction() {
     if (!session.characterId) return;
     setBusy(true);
     setError('');
     try {
-      await api.rest(session.characterId);
-      onComplete();
+      if (hasActiveRest) {
+        await api.stopRest(session.characterId);
+        onStop();
+      } else {
+        await api.rest(session.characterId);
+        onComplete();
+      }
     } catch (e) {
       setError(formatUiError(e));
       setTimeout(() => setError(''), 4000);
@@ -528,12 +596,20 @@ function RestButton({ canRest, onComplete }: { canRest: boolean; onComplete: () 
   return (
     <div className="relative">
       <button
-        onClick={() => void rest()}
-        disabled={!canRest || busy}
+        onClick={() => void runRestAction()}
+        disabled={(!canRest && !hasActiveRest) || hasBlockingActivity || busy}
         className="w-full text-center text-xs text-heliora-green border border-heliora-green/30 rounded py-1 hover:bg-heliora-green/10 disabled:opacity-40 disabled:cursor-not-allowed"
-        title={canRest ? 'Rest at this location' : 'Move to a safehouse, clinic, or hub to rest'}
+        title={
+          hasBlockingActivity
+            ? 'Finish the current activity before resting'
+            : hasActiveRest
+              ? 'Stop the active rest session'
+              : canRest
+                ? 'Rest at this location'
+                : 'Move to a safehouse, clinic, or hub to rest'
+        }
       >
-        {busy ? '◌' : '☾ REST'}
+        {busy ? '◌' : hasActiveRest ? 'STOP REST' : '☾ REST'}
       </button>
       {error && (
         <div className="absolute top-full left-0 right-0 mt-1 text-[10px] text-heliora-red text-center">

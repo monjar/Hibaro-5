@@ -1,10 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { getStoredAdminToken, setStoredAdminToken } from '../lib/api';
+import { FormEvent, useEffect, useState } from 'react';
+import {
+  adminApi,
+  clearAdminSession,
+  getStoredAdminPlayer,
+  getStoredAdminToken,
+  writeAdminSession,
+} from '../lib/api';
 
 const NAV: Array<{ href: string; label: string }> = [
   { href: '/', label: 'OVERVIEW' },
+  { href: '/players', label: 'PLAYERS' },
   { href: '/opportunities', label: 'OPPORTUNITIES' },
   { href: '/locations', label: 'LOCATIONS' },
   { href: '/factions', label: 'FACTIONS' },
@@ -22,20 +29,107 @@ export function AdminShell({
   blurb?: string;
   children: React.ReactNode;
 }) {
-  const [token, setToken] = useState('');
-  const [revealed, setRevealed] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [player, setPlayer] = useState<ReturnType<typeof getStoredAdminPlayer>>(null);
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    setToken(getStoredAdminToken() ?? '');
+    const sync = () => {
+      setToken(getStoredAdminToken());
+      setPlayer(getStoredAdminPlayer());
+      setReady(true);
+    };
+
+    sync();
+    window.addEventListener('heliora:admin-session', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('heliora:admin-session', sync);
+      window.removeEventListener('storage', sync);
+    };
   }, []);
 
-  function save() {
-    setStoredAdminToken(token.trim() === '' ? null : token.trim());
+  async function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+
+    try {
+      const result = await adminApi.login(identifier, password);
+      if (!result.player.isAdmin) {
+        clearAdminSession();
+        setError('This account is not marked as admin in the database.');
+        return;
+      }
+      writeAdminSession(result.accessToken, result.player);
+      setIdentifier('');
+      setPassword('');
+    } catch (err) {
+      setError((err as Error).message.replace(/^API error \d+: /, ''));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function clear() {
-    setStoredAdminToken(null);
-    setToken('');
+  function logout() {
+    clearAdminSession();
+    setError('');
+  }
+
+  if (!ready) {
+    return <main className="min-h-screen bg-heliora-dark text-heliora-text p-6">Loading…</main>;
+  }
+
+  if (!token || !player?.isAdmin) {
+    return (
+      <main className="min-h-screen bg-heliora-dark text-heliora-text">
+        <div className="mx-auto flex min-h-screen max-w-md items-center px-6 py-12">
+          <div className="w-full rounded border border-heliora-border bg-heliora-panel p-6">
+            <p className="text-sm uppercase tracking-[0.3em] text-heliora-cyan">Heliora Admin</p>
+            <h1 className="mt-3 text-2xl font-bold">Sign in</h1>
+            <p className="mt-2 text-sm text-heliora-text-dim">
+              Access is granted by the player record in the database. Use a normal account login.
+            </p>
+            <form className="mt-5 space-y-4" onSubmit={login}>
+              <label className="block text-xs uppercase tracking-wider text-heliora-text-dim">
+                Username or email
+                <input
+                  type="text"
+                  value={identifier}
+                  onChange={(event) => setIdentifier(event.target.value)}
+                  className="mt-1 w-full rounded border border-heliora-border bg-heliora-dark px-3 py-2 text-sm text-heliora-text"
+                />
+              </label>
+              <label className="block text-xs uppercase tracking-wider text-heliora-text-dim">
+                Password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="mt-1 w-full rounded border border-heliora-border bg-heliora-dark px-3 py-2 text-sm text-heliora-text"
+                />
+              </label>
+              {error && (
+                <div className="rounded border border-heliora-red/40 bg-heliora-red/10 px-3 py-2 text-sm text-heliora-red">
+                  {error}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={busy || identifier.trim() === '' || password.trim() === ''}
+                className="w-full rounded border border-heliora-cyan/60 bg-heliora-cyan/10 px-4 py-2 text-sm font-bold text-heliora-cyan hover:bg-heliora-cyan/20 disabled:opacity-40"
+              >
+                {busy ? 'SIGNING IN…' : 'SIGN IN'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -59,39 +153,17 @@ export function AdminShell({
             </nav>
           </div>
           <div className="rounded border border-heliora-border bg-heliora-panel p-3 text-xs">
-            <p className="mb-2 font-bold uppercase tracking-wider text-heliora-yellow">
-              Admin token
+            <p className="mb-1 font-bold uppercase tracking-wider text-heliora-yellow">
+              Authenticated admin
             </p>
-            <div className="flex items-center gap-2">
-              <input
-                type={revealed ? 'text' : 'password'}
-                placeholder="x-admin-token"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                className="w-56 rounded border border-heliora-border bg-heliora-dark px-2 py-1 font-mono text-xs text-heliora-cyan"
-              />
-              <button
-                onClick={() => setRevealed((r) => !r)}
-                className="rounded border border-heliora-border px-2 py-1 hover:border-heliora-cyan hover:text-heliora-cyan"
-              >
-                {revealed ? 'HIDE' : 'SHOW'}
-              </button>
-              <button
-                onClick={save}
-                className="rounded border border-heliora-green/60 bg-heliora-green/10 px-2 py-1 font-bold text-heliora-green hover:bg-heliora-green/20"
-              >
-                SAVE
-              </button>
-              <button
-                onClick={clear}
-                className="rounded border border-heliora-red/40 px-2 py-1 text-heliora-red hover:bg-heliora-red/10"
-              >
-                CLEAR
-              </button>
-            </div>
-            <p className="mt-2 text-[10px] text-heliora-text-dim">
-              Stored in browser localStorage, sent as <code>x-admin-token</code> on writes.
-            </p>
+            <p className="font-mono text-heliora-cyan">{player.username}</p>
+            {player.email && <p className="mt-1 text-heliora-text-dim">{player.email}</p>}
+            <button
+              onClick={logout}
+              className="mt-3 rounded border border-heliora-red/40 px-2 py-1 text-heliora-red hover:bg-heliora-red/10"
+            >
+              LOG OUT
+            </button>
           </div>
         </header>
         {children}

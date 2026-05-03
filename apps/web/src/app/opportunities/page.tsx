@@ -14,6 +14,12 @@ import {
   formatOpportunityCheckHint,
   formatUiError,
 } from '@/lib/ui-presenters';
+import {
+  getAcceptedDescription,
+  getRestProgress,
+  getTimelineEventDescription,
+  isRestActivity,
+} from '@/lib/opportunity-activity';
 import { useRewardReferenceLookup } from '@/lib/use-reward-reference-lookup';
 import type {
   JobEmployment,
@@ -127,6 +133,20 @@ export default function OpportunitiesPage() {
       setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setResolving(null);
+      setTimeout(() => setMessage(''), 4500);
+    }
+  }
+
+  async function stopRest() {
+    if (!session.characterId) return;
+    setMessage('');
+    try {
+      await api.stopRest(session.characterId);
+      setMessage('✅ Rest interrupted');
+      await refresh();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
       setTimeout(() => setMessage(''), 4500);
     }
   }
@@ -387,6 +407,10 @@ export default function OpportunitiesPage() {
               const completesAtMs = new Date(inst.completesAt).getTime();
               const startedAtMs = new Date(inst.startedAt).getTime();
               const isReady = completesAtMs <= now;
+              const isRest = isRestActivity(inst);
+              const rest = getRestProgress(inst);
+              const acceptedDescription = getAcceptedDescription(inst);
+              const timelineEvent = getTimelineEventDescription(inst, now);
               const remaining = Math.max(
                 0,
                 Math.floor((completesAtMs - now) / 1000),
@@ -407,11 +431,13 @@ export default function OpportunitiesPage() {
                       <span className="text-heliora-text font-mono text-sm">
                         {inst.definition.title}
                       </span>
-                      <Tooltip content={formatOpportunityCheckHint(inst.definition)}>
-                        <span className="rounded border border-heliora-border px-2 py-0.5 text-[10px] text-heliora-text-dim">
-                          DC {inst.definition.difficulty}
-                        </span>
-                      </Tooltip>
+                      {!isRest && (
+                        <Tooltip content={formatOpportunityCheckHint(inst.definition)}>
+                          <span className="rounded border border-heliora-border px-2 py-0.5 text-[10px] text-heliora-text-dim">
+                            DC {inst.definition.difficulty}
+                          </span>
+                        </Tooltip>
+                      )}
                     </div>
                     {isReady ? (
                       <button
@@ -419,7 +445,14 @@ export default function OpportunitiesPage() {
                         disabled={resolving === inst.id}
                         className="px-3 py-1 bg-heliora-green/20 border border-heliora-green/50 rounded text-heliora-green text-xs font-mono font-bold hover:bg-heliora-green/30 disabled:opacity-50"
                       >
-                        {resolving === inst.id ? '…' : 'RESOLVE'}
+                        {resolving === inst.id ? '…' : isRest ? 'FINISH REST' : 'RESOLVE'}
+                      </button>
+                    ) : isRest ? (
+                      <button
+                        onClick={() => void stopRest()}
+                        className="px-3 py-1 rounded border border-heliora-yellow/50 bg-heliora-yellow/10 text-heliora-yellow text-xs font-mono font-bold hover:bg-heliora-yellow/20"
+                      >
+                        STOP REST
                       </button>
                     ) : (
                       <span className="text-xs text-heliora-text-dim">
@@ -433,9 +466,23 @@ export default function OpportunitiesPage() {
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                  {inst.definition.description && (
+                  {acceptedDescription && (
                     <p className="mt-2 text-xs text-heliora-text-dim">
-                      {inst.definition.description}
+                      {acceptedDescription}
+                    </p>
+                  )}
+                  {timelineEvent && (
+                    <div className="mt-2 rounded border border-heliora-cyan/20 bg-black/10 px-3 py-2 text-xs text-heliora-text">
+                      <span className="mr-2 uppercase tracking-wider text-heliora-cyan/80">
+                        Live update
+                      </span>
+                      {timelineEvent}
+                    </div>
+                  )}
+                  {isRest && rest && (
+                    <p className="mt-2 text-[11px] text-heliora-text-dim">
+                      {rest.buildingName ?? 'Current building'} · +{rest.energyPerMinute ?? 0} EN/min
+                      {rest.healthPerMinute ? ` · +${rest.healthPerMinute} HP/min` : ''}
                     </p>
                   )}
                   {inst.definition.questData?.hint && (
