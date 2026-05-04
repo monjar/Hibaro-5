@@ -2,24 +2,30 @@ interface StatBarProps {
   label: string;
   value: number;
   max: number;
+  /** legacy tailwind class like "bg-heliora-red"; mapped to design tone */
   color?: string;
 }
 
+const COLOR_TO_TONE: Record<string, 'cyan' | 'red' | 'green' | 'yellow'> = {
+  'bg-heliora-red': 'red',
+  'bg-heliora-green': 'green',
+  'bg-heliora-yellow': 'yellow',
+  'bg-heliora-cyan': 'cyan',
+};
+
 export function StatBar({ label, value, max, color = 'bg-heliora-cyan' }: StatBarProps) {
+  const tone = COLOR_TO_TONE[color] ?? 'cyan';
   const pct = Math.min(100, Math.max(0, (value / max) * 100));
   return (
-    <div className="mb-2">
-      <div className="flex justify-between text-xs mb-1">
-        <span className="text-heliora-text-dim uppercase tracking-wider">{label}</span>
-        <span className="text-heliora-cyan font-mono">
+    <div className="hib-bar" style={{ marginBottom: 8 }}>
+      <div className="hib-bar__head">
+        <span>{label}</span>
+        <span className="hib-bar__val">
           {value}/{max}
         </span>
       </div>
-      <div className="h-1.5 bg-heliora-border rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${color}`}
-          style={{ width: `${pct}%` }}
-        />
+      <div className="hib-bar__track">
+        <div className={`hib-bar__fill hib-bar__fill--${tone}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -31,19 +37,13 @@ interface StatPillProps {
 }
 
 export function StatPill({ label, value }: StatPillProps) {
-  const color =
-    value >= 15
-      ? 'text-heliora-green'
-      : value >= 10
-        ? 'text-heliora-cyan'
-        : value >= 5
-          ? 'text-heliora-text'
-          : 'text-heliora-text-dim';
-
+  const tier = value >= 15 ? 'high' : value >= 10 ? 'mid' : 'low';
   return (
-    <div className="flex flex-col items-center bg-heliora-dark rounded p-2 border border-heliora-border">
-      <span className={`text-lg font-bold font-mono ${color}`}>{value}</span>
-      <span className="text-xs text-heliora-text-dim uppercase tracking-wider">{label}</span>
+    <div className="hib-stat">
+      <span className={`hib-stat__val hib-stat__val--${tier}`}>
+        {String(value).padStart(2, '0')}
+      </span>
+      <span className="hib-stat__label">{label}</span>
     </div>
   );
 }

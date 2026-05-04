@@ -215,6 +215,22 @@ function MapTab({
     }
   }
 
+  async function onUpdateBuilding(
+    buildingId: string,
+    patch: Partial<AdminBuildingInput>,
+  ) {
+    setBusy(true);
+    try {
+      await adminApi.updateBuilding(buildingId, patch);
+      await reload();
+    } catch (err) {
+      flash(`- ${(err as Error).message.replace(/^API error \d+: /, '')}`);
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (districts.length === 0) {
     return (
       <section className="rounded border border-heliora-border bg-heliora-panel p-6 text-center text-heliora-text-dim">
@@ -247,6 +263,7 @@ function MapTab({
           flash={flash}
           onSaveMap={onSaveMap}
           onMoveBuilding={onMoveBuilding}
+          onUpdateBuilding={onUpdateBuilding}
         />
       )}
     </>

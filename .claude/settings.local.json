@@ -9,7 +9,27 @@
       "Bash(npx prettier *)",
       "Bash(git stash *)",
       "Bash(git filter-branch -f --env-filter ' *)",
-      "Bash(awk '{print $1}')"
+      "Bash(awk '{print $1}')",
+      "Bash(npx next *)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3007/)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3007/login)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3007/inventory)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3007/opportunities)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3007/shop)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3007/travel)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3007/market)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3007/activity)",
+      "Bash(pkill -f \"next dev -p 3007\")",
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(mkdir -p /tmp/map-design)",
+      "Bash(cp /home/amirali/.claude/projects/-home-amirali-Projects-Hibaro-5/017e8bfe-9989-49f7-8985-514a62566ffb/tool-results/webfetch-1777918554378-6iznl6.bin /tmp/map-design/d.gz)",
+      "Bash(gunzip /tmp/map-design/d.gz)",
+      "Bash(mkdir -p /tmp/map-design/extracted)",
+      "Bash(tar -xf /tmp/map-design/d -C /tmp/map-design/extracted)",
+      "Bash(pkill -f \"next dev -p 3010\")",
+      "Bash(pkill -f \"next dev -p 3011\")",
+      "Bash(kill 31241 31273 31275 41073 41123 41125)"
     ]
   }
 }

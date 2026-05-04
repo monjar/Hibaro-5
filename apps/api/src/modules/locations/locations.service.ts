@@ -66,7 +66,15 @@ export interface AdminBuildingInput {
   status?: BuildingStatus;
   gridX?: number | null;
   gridY?: number | null;
+  gridWidth?: number;
+  gridHeight?: number;
+  gridZ?: number;
 }
+
+const BUILDING_SIZE_MIN = 1;
+const BUILDING_SIZE_MAX = 16;
+const BUILDING_Z_MIN = 0.1;
+const BUILDING_Z_MAX = 6;
 
 const PLANET_TYPES: PlanetType[] = [
   'TERRESTRIAL',
@@ -304,7 +312,8 @@ export class LocationsService {
       (b) =>
         b.gridX != null &&
         b.gridY != null &&
-        (b.gridX >= input.width || b.gridY >= input.height),
+        (b.gridX + (b.gridWidth ?? 1) > input.width ||
+          b.gridY + (b.gridHeight ?? 1) > input.height),
     );
     if (orphanedBuildings.length > 0) {
       throw new BadRequestException(
@@ -393,10 +402,44 @@ export class LocationsService {
     }
   }
 
+  private validateBuildingSize(gridWidth?: number, gridHeight?: number, gridZ?: number) {
+    if (gridWidth !== undefined) {
+      if (
+        !Number.isInteger(gridWidth) ||
+        gridWidth < BUILDING_SIZE_MIN ||
+        gridWidth > BUILDING_SIZE_MAX
+      ) {
+        throw new BadRequestException(
+          `gridWidth must be an integer between ${BUILDING_SIZE_MIN} and ${BUILDING_SIZE_MAX}`,
+        );
+      }
+    }
+    if (gridHeight !== undefined) {
+      if (
+        !Number.isInteger(gridHeight) ||
+        gridHeight < BUILDING_SIZE_MIN ||
+        gridHeight > BUILDING_SIZE_MAX
+      ) {
+        throw new BadRequestException(
+          `gridHeight must be an integer between ${BUILDING_SIZE_MIN} and ${BUILDING_SIZE_MAX}`,
+        );
+      }
+    }
+    if (gridZ !== undefined) {
+      if (typeof gridZ !== 'number' || gridZ < BUILDING_Z_MIN || gridZ > BUILDING_Z_MAX) {
+        throw new BadRequestException(
+          `gridZ must be a number between ${BUILDING_Z_MIN} and ${BUILDING_Z_MAX}`,
+        );
+      }
+    }
+  }
+
   private async validateBuildingPlacement(
     districtId: string,
     gridX: number | null | undefined,
     gridY: number | null | undefined,
+    gridWidth: number,
+    gridHeight: number,
     excludeBuildingId?: string,
   ) {
     const xProvided = gridX !== undefined && gridX !== null;
@@ -410,37 +453,48 @@ export class LocationsService {
     }
     const district = await this.prisma.district.findUnique({ where: { id: districtId } });
     if (!district) throw new BadRequestException(`District ${districtId} not found`);
-    if (gridX! < 0 || gridX! >= district.mapWidth) {
+    if (gridX! < 0 || gridX! + gridWidth > district.mapWidth) {
       throw new BadRequestException(
-        `gridX out of bounds (0..${district.mapWidth - 1}): ${gridX}`,
+        `Footprint out of bounds: x=${gridX} width=${gridWidth} exceeds map width ${district.mapWidth}`,
       );
     }
-    if (gridY! < 0 || gridY! >= district.mapHeight) {
+    if (gridY! < 0 || gridY! + gridHeight > district.mapHeight) {
       throw new BadRequestException(
-        `gridY out of bounds (0..${district.mapHeight - 1}): ${gridY}`,
+        `Footprint out of bounds: y=${gridY} height=${gridHeight} exceeds map height ${district.mapHeight}`,
       );
     }
-    const collision = await this.prisma.building.findFirst({
+    const others = await this.prisma.building.findMany({
       where: {
         districtId,
-        gridX: gridX!,
-        gridY: gridY!,
+        gridX: { not: null },
+        gridY: { not: null },
         ...(excludeBuildingId ? { id: { not: excludeBuildingId } } : {}),
       },
     });
-    if (collision) {
-      throw new BadRequestException(
-        `Cell (${gridX},${gridY}) is already occupied by ${collision.name}`,
-      );
+    for (const o of others) {
+      const ox = o.gridX as number;
+      const oy = o.gridY as number;
+      const ow = o.gridWidth ?? 1;
+      const oh = o.gridHeight ?? 1;
+      const overlapsX = gridX! < ox + ow && ox < gridX! + gridWidth;
+      const overlapsY = gridY! < oy + oh && oy < gridY! + gridHeight;
+      if (overlapsX && overlapsY) {
+        throw new BadRequestException(
+          `Footprint overlaps with ${o.name} at (${ox},${oy}) size ${ow}×${oh}`,
+        );
+      }
     }
   }
 
   // Building CRUD
   async createBuilding(data: AdminBuildingInput) {
     this.validateBuildingInput(data);
+    this.validateBuildingSize(data.gridWidth, data.gridHeight, data.gridZ);
     const district = await this.prisma.district.findUnique({ where: { id: data.districtId } });
     if (!district) throw new BadRequestException(`District ${data.districtId} not found`);
-    await this.validateBuildingPlacement(data.districtId, data.gridX, data.gridY);
+    const w = data.gridWidth ?? 1;
+    const h = data.gridHeight ?? 1;
+    await this.validateBuildingPlacement(data.districtId, data.gridX, data.gridY, w, h);
     return this.prisma.building.create({
       data: {
         districtId: data.districtId,
@@ -452,6 +506,9 @@ export class LocationsService {
         status: data.status ?? 'OPEN',
         gridX: data.gridX ?? null,
         gridY: data.gridY ?? null,
+        gridWidth: w,
+        gridHeight: h,
+        gridZ: data.gridZ ?? 1.4,
       },
     });
   }
@@ -470,12 +527,20 @@ export class LocationsService {
         }
       }
     }
-    const placementTouched = data.gridX !== undefined || data.gridY !== undefined;
+    this.validateBuildingSize(data.gridWidth, data.gridHeight, data.gridZ);
+    const placementTouched =
+      data.gridX !== undefined ||
+      data.gridY !== undefined ||
+      data.gridWidth !== undefined ||
+      data.gridHeight !== undefined ||
+      data.districtId !== undefined;
     if (placementTouched) {
       const targetDistrictId = data.districtId ?? existing.districtId;
       const nextX = data.gridX !== undefined ? data.gridX : existing.gridX;
       const nextY = data.gridY !== undefined ? data.gridY : existing.gridY;
-      await this.validateBuildingPlacement(targetDistrictId, nextX, nextY, id);
+      const nextW = data.gridWidth !== undefined ? data.gridWidth : existing.gridWidth;
+      const nextH = data.gridHeight !== undefined ? data.gridHeight : existing.gridHeight;
+      await this.validateBuildingPlacement(targetDistrictId, nextX, nextY, nextW, nextH, id);
     }
     return this.prisma.building.update({
       where: { id },
@@ -491,6 +556,9 @@ export class LocationsService {
         ...(data.status !== undefined ? { status: data.status } : {}),
         ...(data.gridX !== undefined ? { gridX: data.gridX } : {}),
         ...(data.gridY !== undefined ? { gridY: data.gridY } : {}),
+        ...(data.gridWidth !== undefined ? { gridWidth: data.gridWidth } : {}),
+        ...(data.gridHeight !== undefined ? { gridHeight: data.gridHeight } : {}),
+        ...(data.gridZ !== undefined ? { gridZ: data.gridZ } : {}),
       },
     });
   }

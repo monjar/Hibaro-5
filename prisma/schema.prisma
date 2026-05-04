@@ -313,6 +313,9 @@ model Building {
   status        BuildingStatus    @default(OPEN)
   gridX         Int?
   gridY         Int?
+  gridWidth     Int               @default(1)
+  gridHeight    Int               @default(1)
+  gridZ         Float             @default(1.4)
 
   characters          Character[]
   factionHeadquarters Faction[]     @relation("FactionHQ")

@@ -207,6 +207,9 @@ export interface AdminBuildingInput {
   status?: BuildingStatus;
   gridX?: number | null;
   gridY?: number | null;
+  gridWidth?: number;
+  gridHeight?: number;
+  gridZ?: number;
 }
 
 export interface AdminFactionInput {
@@ -338,6 +341,9 @@ export interface AdminBuilding {
   status: BuildingStatus;
   gridX?: number | null;
   gridY?: number | null;
+  gridWidth: number;
+  gridHeight: number;
+  gridZ: number;
   district?: { id: string; name: string; planet?: { id: string; name: string } };
 }
 
