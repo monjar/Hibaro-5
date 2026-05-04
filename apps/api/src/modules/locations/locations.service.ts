@@ -14,6 +14,20 @@ type BuildingFunction =
   | 'BLACK_MARKET'
   | 'MISSION_BOARD';
 
+type MapTileLayer = 'TERRAIN' | 'ROAD' | 'PROP';
+type TerrainVariant = 'GRASS' | 'DIRT' | 'WATER';
+type RoadVariant = 'ROAD_STRAIGHT' | 'ROAD_CORNER' | 'ROAD_T' | 'ROAD_CROSS';
+type PropVariant = 'TREE' | 'LAMP' | 'FENCE' | 'FOUNTAIN';
+type MapTileType = TerrainVariant | RoadVariant | PropVariant;
+
+export interface MapTile {
+  x: number;
+  y: number;
+  layer: MapTileLayer;
+  type: MapTileType;
+  rotation?: 0 | 90 | 180 | 270;
+}
+
 export interface AdminPlanetInput {
   solarSystemId: string;
   name: string;
@@ -32,6 +46,14 @@ export interface AdminDistrictInput {
   dangerLevel?: number;
   lawLevel?: number;
   economyLevel?: number;
+  mapWidth?: number;
+  mapHeight?: number;
+}
+
+export interface AdminDistrictMapInput {
+  width: number;
+  height: number;
+  tiles: MapTile[];
 }
 
 export interface AdminBuildingInput {
@@ -42,6 +64,8 @@ export interface AdminBuildingInput {
   ownerId?: string | null;
   functionality?: BuildingFunction[];
   status?: BuildingStatus;
+  gridX?: number | null;
+  gridY?: number | null;
 }
 
 const PLANET_TYPES: PlanetType[] = [
@@ -70,6 +94,13 @@ const BUILDING_FUNCTIONS: BuildingFunction[] = [
 const BUILDING_STATUSES: BuildingStatus[] = ['OPEN', 'CLOSED', 'DAMAGED', 'ABANDONED', 'LOCKED_DOWN'];
 
 const BUILDING_OWNER_TYPES: BuildingOwnerType[] = ['CHARACTER', 'FACTION', 'CORPORATION', 'SYSTEM'];
+
+const MAP_TILE_LAYERS: MapTileLayer[] = ['TERRAIN', 'ROAD', 'PROP'];
+const TERRAIN_VARIANTS: TerrainVariant[] = ['GRASS', 'DIRT', 'WATER'];
+const ROAD_VARIANTS: RoadVariant[] = ['ROAD_STRAIGHT', 'ROAD_CORNER', 'ROAD_T', 'ROAD_CROSS'];
+const PROP_VARIANTS: PropVariant[] = ['TREE', 'LAMP', 'FENCE', 'FOUNTAIN'];
+const MAP_DIMENSION_MIN = 1;
+const MAP_DIMENSION_MAX = 64;
 
 @Injectable()
 export class LocationsService {
@@ -215,6 +246,8 @@ export class LocationsService {
         dangerLevel: data.dangerLevel ?? 1,
         lawLevel: data.lawLevel ?? 5,
         economyLevel: data.economyLevel ?? 5,
+        ...(data.mapWidth !== undefined ? { mapWidth: data.mapWidth } : {}),
+        ...(data.mapHeight !== undefined ? { mapHeight: data.mapHeight } : {}),
       },
     });
   }
@@ -243,7 +276,49 @@ export class LocationsService {
         ...(data.dangerLevel !== undefined ? { dangerLevel: data.dangerLevel } : {}),
         ...(data.lawLevel !== undefined ? { lawLevel: data.lawLevel } : {}),
         ...(data.economyLevel !== undefined ? { economyLevel: data.economyLevel } : {}),
+        ...(data.mapWidth !== undefined ? { mapWidth: data.mapWidth } : {}),
+        ...(data.mapHeight !== undefined ? { mapHeight: data.mapHeight } : {}),
       },
+    });
+  }
+
+  async updateDistrictMap(id: string, input: AdminDistrictMapInput) {
+    const district = await this.getDistrictById(id);
+    this.validateMapDimension('width', input.width);
+    this.validateMapDimension('height', input.height);
+    if (!Array.isArray(input.tiles)) {
+      throw new BadRequestException('tiles must be an array');
+    }
+    const seen = new Set<string>();
+    for (const tile of input.tiles) {
+      this.validateMapTile(tile, input.width, input.height);
+      const key = `${tile.x},${tile.y},${tile.layer}`;
+      if (seen.has(key)) {
+        throw new BadRequestException(
+          `Duplicate tile at (${tile.x},${tile.y}) on layer ${tile.layer}`,
+        );
+      }
+      seen.add(key);
+    }
+    const orphanedBuildings = district.buildings.filter(
+      (b) =>
+        b.gridX != null &&
+        b.gridY != null &&
+        (b.gridX >= input.width || b.gridY >= input.height),
+    );
+    if (orphanedBuildings.length > 0) {
+      throw new BadRequestException(
+        `Cannot resize: ${orphanedBuildings.length} placed building(s) would fall outside the new bounds. Move them first.`,
+      );
+    }
+    return this.prisma.district.update({
+      where: { id },
+      data: {
+        mapWidth: input.width,
+        mapHeight: input.height,
+        mapTiles: input.tiles as never,
+      },
+      include: { planet: true, buildings: true, controllingFaction: true },
     });
   }
 
@@ -275,6 +350,89 @@ export class LocationsService {
     this.validateLevel('dangerLevel', input.dangerLevel);
     this.validateLevel('lawLevel', input.lawLevel);
     this.validateLevel('economyLevel', input.economyLevel);
+    if (input.mapWidth !== undefined) this.validateMapDimension('mapWidth', input.mapWidth);
+    if (input.mapHeight !== undefined) this.validateMapDimension('mapHeight', input.mapHeight);
+  }
+
+  private validateMapDimension(field: string, value: number) {
+    if (!Number.isInteger(value) || value < MAP_DIMENSION_MIN || value > MAP_DIMENSION_MAX) {
+      throw new BadRequestException(
+        `${field} must be an integer between ${MAP_DIMENSION_MIN} and ${MAP_DIMENSION_MAX}`,
+      );
+    }
+  }
+
+  private validateMapTile(tile: MapTile, width: number, height: number) {
+    if (!tile || typeof tile !== 'object') {
+      throw new BadRequestException('Each tile must be an object');
+    }
+    if (!Number.isInteger(tile.x) || tile.x < 0 || tile.x >= width) {
+      throw new BadRequestException(`tile.x out of bounds (0..${width - 1}): ${tile.x}`);
+    }
+    if (!Number.isInteger(tile.y) || tile.y < 0 || tile.y >= height) {
+      throw new BadRequestException(`tile.y out of bounds (0..${height - 1}): ${tile.y}`);
+    }
+    if (!MAP_TILE_LAYERS.includes(tile.layer)) {
+      throw new BadRequestException(
+        `tile.layer must be one of ${MAP_TILE_LAYERS.join(', ')}`,
+      );
+    }
+    const allowedTypes =
+      tile.layer === 'TERRAIN'
+        ? TERRAIN_VARIANTS
+        : tile.layer === 'ROAD'
+          ? ROAD_VARIANTS
+          : PROP_VARIANTS;
+    if (!(allowedTypes as string[]).includes(tile.type)) {
+      throw new BadRequestException(
+        `tile.type for layer ${tile.layer} must be one of ${allowedTypes.join(', ')}`,
+      );
+    }
+    if (tile.rotation !== undefined && ![0, 90, 180, 270].includes(tile.rotation)) {
+      throw new BadRequestException('tile.rotation must be 0, 90, 180, or 270');
+    }
+  }
+
+  private async validateBuildingPlacement(
+    districtId: string,
+    gridX: number | null | undefined,
+    gridY: number | null | undefined,
+    excludeBuildingId?: string,
+  ) {
+    const xProvided = gridX !== undefined && gridX !== null;
+    const yProvided = gridY !== undefined && gridY !== null;
+    if (xProvided !== yProvided) {
+      throw new BadRequestException('gridX and gridY must both be set or both be null');
+    }
+    if (!xProvided) return;
+    if (!Number.isInteger(gridX) || !Number.isInteger(gridY)) {
+      throw new BadRequestException('gridX and gridY must be integers');
+    }
+    const district = await this.prisma.district.findUnique({ where: { id: districtId } });
+    if (!district) throw new BadRequestException(`District ${districtId} not found`);
+    if (gridX! < 0 || gridX! >= district.mapWidth) {
+      throw new BadRequestException(
+        `gridX out of bounds (0..${district.mapWidth - 1}): ${gridX}`,
+      );
+    }
+    if (gridY! < 0 || gridY! >= district.mapHeight) {
+      throw new BadRequestException(
+        `gridY out of bounds (0..${district.mapHeight - 1}): ${gridY}`,
+      );
+    }
+    const collision = await this.prisma.building.findFirst({
+      where: {
+        districtId,
+        gridX: gridX!,
+        gridY: gridY!,
+        ...(excludeBuildingId ? { id: { not: excludeBuildingId } } : {}),
+      },
+    });
+    if (collision) {
+      throw new BadRequestException(
+        `Cell (${gridX},${gridY}) is already occupied by ${collision.name}`,
+      );
+    }
   }
 
   // Building CRUD
@@ -282,6 +440,7 @@ export class LocationsService {
     this.validateBuildingInput(data);
     const district = await this.prisma.district.findUnique({ where: { id: data.districtId } });
     if (!district) throw new BadRequestException(`District ${data.districtId} not found`);
+    await this.validateBuildingPlacement(data.districtId, data.gridX, data.gridY);
     return this.prisma.building.create({
       data: {
         districtId: data.districtId,
@@ -291,12 +450,14 @@ export class LocationsService {
         ownerId: data.ownerId ?? null,
         functionality: (data.functionality ?? []) as never,
         status: data.status ?? 'OPEN',
+        gridX: data.gridX ?? null,
+        gridY: data.gridY ?? null,
       },
     });
   }
 
   async updateBuilding(id: string, data: Partial<AdminBuildingInput>) {
-    await this.getBuildingById(id);
+    const existing = await this.getBuildingById(id);
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('No fields to update');
     }
@@ -308,6 +469,13 @@ export class LocationsService {
           );
         }
       }
+    }
+    const placementTouched = data.gridX !== undefined || data.gridY !== undefined;
+    if (placementTouched) {
+      const targetDistrictId = data.districtId ?? existing.districtId;
+      const nextX = data.gridX !== undefined ? data.gridX : existing.gridX;
+      const nextY = data.gridY !== undefined ? data.gridY : existing.gridY;
+      await this.validateBuildingPlacement(targetDistrictId, nextX, nextY, id);
     }
     return this.prisma.building.update({
       where: { id },
@@ -321,6 +489,8 @@ export class LocationsService {
           ? { functionality: data.functionality as never }
           : {}),
         ...(data.status !== undefined ? { status: data.status } : {}),
+        ...(data.gridX !== undefined ? { gridX: data.gridX } : {}),
+        ...(data.gridY !== undefined ? { gridY: data.gridY } : {}),
       },
     });
   }

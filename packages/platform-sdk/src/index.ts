@@ -156,6 +156,29 @@ export interface AdminDistrictInput {
   dangerLevel?: number;
   lawLevel?: number;
   economyLevel?: number;
+  mapWidth?: number;
+  mapHeight?: number;
+}
+
+export type MapTileLayer = 'TERRAIN' | 'ROAD' | 'PROP';
+export type TerrainVariant = 'GRASS' | 'DIRT' | 'WATER';
+export type RoadVariant = 'ROAD_STRAIGHT' | 'ROAD_CORNER' | 'ROAD_T' | 'ROAD_CROSS';
+export type PropVariant = 'TREE' | 'LAMP' | 'FENCE' | 'FOUNTAIN';
+export type MapTileType = TerrainVariant | RoadVariant | PropVariant;
+export type MapTileRotation = 0 | 90 | 180 | 270;
+
+export interface MapTile {
+  x: number;
+  y: number;
+  layer: MapTileLayer;
+  type: MapTileType;
+  rotation?: MapTileRotation;
+}
+
+export interface AdminDistrictMapInput {
+  width: number;
+  height: number;
+  tiles: MapTile[];
 }
 
 export type BuildingFunction =
@@ -182,6 +205,8 @@ export interface AdminBuildingInput {
   ownerId?: string | null;
   functionality?: BuildingFunction[];
   status?: BuildingStatus;
+  gridX?: number | null;
+  gridY?: number | null;
 }
 
 export interface AdminFactionInput {
@@ -295,6 +320,9 @@ export interface AdminDistrict {
   dangerLevel: number;
   lawLevel: number;
   economyLevel: number;
+  mapWidth: number;
+  mapHeight: number;
+  mapTiles: MapTile[];
   planet?: { id: string; name: string };
   controllingFaction?: { id: string; name: string } | null;
 }
@@ -308,6 +336,8 @@ export interface AdminBuilding {
   ownerId?: string | null;
   functionality: BuildingFunction[];
   status: BuildingStatus;
+  gridX?: number | null;
+  gridY?: number | null;
   district?: { id: string; name: string; planet?: { id: string; name: string } };
 }
 
@@ -885,6 +915,11 @@ export function createApiClient(config?: ApiClientConfig) {
     deleteDistrict: (id: string) =>
       request<{ deleted: boolean; id: string }>(`/locations/districts/${id}`, {
         method: 'DELETE',
+      }),
+    updateDistrictMap: (id: string, input: AdminDistrictMapInput) =>
+      request<AdminDistrict>(`/locations/districts/${id}/map`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
       }),
     createBuilding: (input: AdminBuildingInput) =>
       post<AdminBuilding>('/locations/buildings', input),

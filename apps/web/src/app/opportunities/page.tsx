@@ -163,20 +163,61 @@ export default function OpportunitiesPage() {
   const availableGigs = available.filter((opportunity) => opportunity.kind === 'GIG');
 
   function shiftStatus(emp: JobEmployment): {
-    label: string;
+    taken: boolean;
     tone: 'green' | 'yellow' | 'red';
+    headline: string;
+    subline: string;
   } {
     const elapsedHours =
       (now - new Date(emp.lastShiftAt).getTime()) / (1000 * 60 * 60);
     const overdue = elapsedHours - emp.cadenceHours;
     if (overdue > 0) {
-      return { label: `OVERDUE ${overdue.toFixed(1)}h`, tone: 'red' };
+      return {
+        taken: false,
+        tone: 'red',
+        headline: "DON'T MISS YOUR SHIFT",
+        subline: `Overdue ${overdue.toFixed(1)}h`,
+      };
     }
     if (overdue > -2) {
-      return { label: `DUE in ${(-overdue).toFixed(1)}h`, tone: 'yellow' };
+      return {
+        taken: false,
+        tone: 'yellow',
+        headline: 'Shift due soon',
+        subline: `DUE in ${(-overdue).toFixed(1)}h`,
+      };
     }
-    return { label: `next shift ${Math.max(0, -overdue).toFixed(0)}h`, tone: 'green' };
+    return {
+      taken: true,
+      tone: 'green',
+      headline: "Today's shift: DONE",
+      subline: `Next shift in ${Math.max(0, -overdue).toFixed(0)}h`,
+    };
   }
+
+  const toneRank: Record<'red' | 'yellow' | 'green', number> = { red: 0, yellow: 1, green: 2 };
+  const sortedActiveJobs = [...activeJobs].sort(
+    (a, b) => toneRank[shiftStatus(a).tone] - toneRank[shiftStatus(b).tone],
+  );
+  const shiftCounts = activeJobs.reduce(
+    (acc, emp) => {
+      const tone = shiftStatus(emp).tone;
+      if (tone === 'red') acc.overdue += 1;
+      else if (tone === 'yellow') acc.due += 1;
+      else acc.done += 1;
+      return acc;
+    },
+    { overdue: 0, due: 0, done: 0 },
+  );
+  const pendingShifts = shiftCounts.overdue + shiftCounts.due;
+  const shiftSummaryTone: 'red' | 'yellow' | 'green' =
+    shiftCounts.overdue > 0 ? 'red' : shiftCounts.due > 0 ? 'yellow' : 'green';
+  const shiftSummaryClass =
+    shiftSummaryTone === 'red'
+      ? 'border-heliora-red/40 bg-heliora-red/10 text-heliora-red'
+      : shiftSummaryTone === 'yellow'
+        ? 'border-heliora-yellow/40 bg-heliora-yellow/10 text-heliora-yellow'
+        : 'border-heliora-green/40 bg-heliora-green/10 text-heliora-green';
 
   function renderOpportunityCard(
     opp: OpportunityDefinition,
@@ -400,6 +441,16 @@ export default function OpportunitiesPage() {
         </div>
       )}
 
+      {activeJobs.length > 0 && (
+        <div
+          className={`rounded border px-3 py-2 text-sm font-mono ${shiftSummaryClass}`}
+        >
+          {pendingShifts > 0
+            ? `${pendingShifts} of ${activeJobs.length} shift${activeJobs.length === 1 ? '' : 's'} pending`
+            : `All ${activeJobs.length} shift${activeJobs.length === 1 ? '' : 's'} done — keep it up`}
+        </div>
+      )}
+
       {inProgress.length > 0 && (
         <Panel title={`Active (${inProgress.length})`} accent="cyan">
           <div className="space-y-2">
@@ -500,19 +551,33 @@ export default function OpportunitiesPage() {
       {activeJobs.length > 0 && (
         <Panel title={`Jobs (${activeJobs.length})`} accent="yellow">
           <div className="space-y-2">
-            {activeJobs.map((emp) => {
+            {sortedActiveJobs.map((emp) => {
               const status = shiftStatus(emp);
-              const toneClass =
+              const pillClass =
                 status.tone === 'red'
                   ? 'text-heliora-red border-heliora-red/40 bg-heliora-red/10'
                   : status.tone === 'yellow'
                     ? 'text-heliora-yellow border-heliora-yellow/40 bg-heliora-yellow/10'
                     : 'text-heliora-green border-heliora-green/40 bg-heliora-green/10';
+              const cardClass =
+                status.tone === 'red'
+                  ? 'border-heliora-red/40 bg-heliora-red/5'
+                  : status.tone === 'yellow'
+                    ? 'border-heliora-yellow/40 bg-heliora-yellow/5'
+                    : 'border-heliora-green/30 bg-heliora-green/5';
+              const headlineClass =
+                status.tone === 'red'
+                  ? 'text-heliora-red'
+                  : status.tone === 'yellow'
+                    ? 'text-heliora-yellow'
+                    : 'text-heliora-green';
               return (
-                <div
-                  key={emp.id}
-                  className="border border-heliora-yellow/20 rounded p-3 bg-heliora-yellow/5"
-                >
+                <div key={emp.id} className={`border rounded p-3 ${cardClass}`}>
+                  <div
+                    className={`mb-2 text-sm font-mono font-bold tracking-wider ${headlineClass}`}
+                  >
+                    {status.headline}
+                  </div>
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
                       <KindBadge kind="JOB" />
@@ -521,11 +586,18 @@ export default function OpportunitiesPage() {
                       </span>
                     </div>
                     <span
-                      className={`text-[10px] font-mono px-2 py-0.5 border rounded ${toneClass}`}
+                      className={`text-[10px] font-mono px-2 py-0.5 border rounded ${pillClass}`}
                     >
-                      {status.label}
+                      {status.subline}
                     </span>
                   </div>
+                  {!status.taken && (
+                    <div
+                      className={`mb-2 rounded border px-2 py-1 text-[11px] font-mono ${pillClass}`}
+                    >
+                      Don't miss your shift — accept the JOB opportunity below to complete it.
+                    </div>
+                  )}
                   <div className="flex items-center justify-between text-xs text-heliora-text-dim">
                     <span>
                       Shifts: {emp.totalShiftsCompleted} · Strikes: {emp.strikes}/3 · Earned: $
