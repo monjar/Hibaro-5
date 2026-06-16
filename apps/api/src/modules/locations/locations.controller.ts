@@ -4,6 +4,7 @@ import { AdminGuard } from '../auth/admin.guard';
 import {
   AdminBuildingInput,
   AdminDistrictInput,
+  AdminDistrictMapInput,
   AdminPlanetInput,
   LocationsService,
 } from './locations.service';
@@ -97,6 +98,13 @@ export class LocationsController {
   @ApiOperation({ summary: 'Delete a district (admin)' })
   deleteDistrict(@Param('id') id: string) {
     return this.locationsService.deleteDistrict(id);
+  }
+
+  @Patch('districts/:id/map')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Update a district map layout (admin)' })
+  updateDistrictMap(@Param('id') id: string, @Body() body: AdminDistrictMapInput) {
+    return this.locationsService.updateDistrictMap(id, body);
   }
 
   // Building admin

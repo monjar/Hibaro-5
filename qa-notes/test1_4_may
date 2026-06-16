@@ -1,0 +1,1 @@
+1. there is a case where I can do a shift at my job but it says "All 1 shift done — keep it up" these two should be mutually exclusive. if i have done  my shifts it should say that and don't let me do a shift again, if i haven't it should say that i have one shift left and a warning not to miss it.  

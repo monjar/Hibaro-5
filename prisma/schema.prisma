@@ -293,6 +293,9 @@ model District {
   dangerLevel          Int      @default(1)
   lawLevel             Int      @default(5)
   economyLevel         Int      @default(5)
+  mapWidth             Int      @default(20)
+  mapHeight            Int      @default(20)
+  mapTiles             Json     @default("[]")
 
   buildings  Building[]
   characters Character[]
@@ -308,6 +311,11 @@ model Building {
   ownerId       String?
   functionality Json              @default("[]")
   status        BuildingStatus    @default(OPEN)
+  gridX         Int?
+  gridY         Int?
+  gridWidth     Int               @default(1)
+  gridHeight    Int               @default(1)
+  gridZ         Float             @default(1.4)
 
   characters          Character[]
   factionHeadquarters Faction[]     @relation("FactionHQ")

@@ -248,8 +248,7 @@ export default function AdminOpportunitiesPage() {
   }
 
   function update<K extends keyof AdminOpportunityInput>(key: K, value: AdminOpportunityInput[K]) {
-    if (!editing) return;
-    setEditing({ ...editing, [key]: value });
+    setEditing((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
   function replaceRequirements(next: StructuredRequirement[]) {

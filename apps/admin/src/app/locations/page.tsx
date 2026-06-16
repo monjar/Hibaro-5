@@ -17,6 +17,7 @@ import type {
 } from '@heliora/platform-sdk';
 import { adminApi } from '../../lib/api';
 import { AdminShell, SelectField, StatusMessage, TextField } from '../../components/AdminShell';
+import { MapEditor } from './MapEditor';
 
 const PLANET_TYPES: PlanetType[] = [
   'TERRESTRIAL',
@@ -51,7 +52,7 @@ const BUILDING_STATUSES: BuildingStatus[] = [
 
 const BUILDING_OWNER_TYPES: BuildingOwnerType[] = ['CHARACTER', 'FACTION', 'CORPORATION', 'SYSTEM'];
 
-type Tab = 'planets' | 'districts' | 'buildings';
+type Tab = 'planets' | 'districts' | 'buildings' | 'map';
 
 export default function AdminLocationsPage() {
   const [tab, setTab] = useState<Tab>('planets');
@@ -97,7 +98,7 @@ export default function AdminLocationsPage() {
       blurb="Manage planets, districts, and buildings. Travel, shops, and faction control all reference these rows."
     >
       <nav className="mb-4 flex gap-2 text-xs">
-        {(['planets', 'districts', 'buildings'] as Tab[]).map((t) => (
+        {(['planets', 'districts', 'buildings', 'map'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -145,7 +146,127 @@ export default function AdminLocationsPage() {
           reload={loadAll}
         />
       )}
+      {tab === 'map' && (
+        <MapTab
+          districts={districts}
+          buildings={buildings}
+          busy={busy}
+          setBusy={setBusy}
+          flash={flash}
+          reload={loadAll}
+        />
+      )}
     </AdminShell>
+  );
+}
+
+function MapTab({
+  districts,
+  buildings,
+  busy,
+  setBusy,
+  flash,
+  reload,
+}: {
+  districts: AdminDistrict[];
+  buildings: AdminBuilding[];
+  busy: boolean;
+  setBusy: (b: boolean) => void;
+  flash: (m: string) => void;
+  reload: () => Promise<void>;
+}) {
+  const [selectedId, setSelectedId] = useState<string>(districts[0]?.id ?? '');
+  useEffect(() => {
+    if (!selectedId && districts[0]) setSelectedId(districts[0].id);
+  }, [districts, selectedId]);
+
+  const district = districts.find((d) => d.id === selectedId);
+  const districtBuildings = buildings.filter((b) => b.districtId === selectedId);
+
+  async function onSaveMap(input: {
+    width: number;
+    height: number;
+    tiles: AdminDistrict['mapTiles'];
+  }) {
+    if (!district) return;
+    setBusy(true);
+    try {
+      await adminApi.updateDistrictMap(district.id, input);
+      flash(`+ Saved map for ${district.name}`);
+      await reload();
+    } catch (err) {
+      flash(`- ${(err as Error).message.replace(/^API error \d+: /, '')}`);
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onMoveBuilding(buildingId: string, gridX: number | null, gridY: number | null) {
+    setBusy(true);
+    try {
+      await adminApi.updateBuilding(buildingId, { gridX, gridY });
+      await reload();
+    } catch (err) {
+      flash(`- ${(err as Error).message.replace(/^API error \d+: /, '')}`);
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onUpdateBuilding(
+    buildingId: string,
+    patch: Partial<AdminBuildingInput>,
+  ) {
+    setBusy(true);
+    try {
+      await adminApi.updateBuilding(buildingId, patch);
+      await reload();
+    } catch (err) {
+      flash(`- ${(err as Error).message.replace(/^API error \d+: /, '')}`);
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (districts.length === 0) {
+    return (
+      <section className="rounded border border-heliora-border bg-heliora-panel p-6 text-center text-heliora-text-dim">
+        Create a district first to edit a map.
+      </section>
+    );
+  }
+
+  return (
+    <>
+      <div className="mb-3">
+        <label className="text-xs uppercase tracking-wider text-heliora-text-dim">District</label>
+        <select
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+          className="ml-2 rounded border border-heliora-border bg-heliora-dark px-3 py-1 text-sm font-mono text-heliora-cyan"
+        >
+          {districts.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {district && (
+        <MapEditor
+          district={district}
+          buildings={districtBuildings}
+          busy={busy}
+          flash={flash}
+          onSaveMap={onSaveMap}
+          onMoveBuilding={onMoveBuilding}
+          onUpdateBuilding={onUpdateBuilding}
+        />
+      )}
+    </>
   );
 }
 
@@ -618,9 +739,13 @@ function BuildingsTab({
     if (!editing) return;
     setBusy(true);
     try {
-      if (editingId) await adminApi.updateBuilding(editingId, editing);
-      else await adminApi.createBuilding(editing);
-      flash(`+ Saved ${editing.name}`);
+      if (editingId) {
+        await adminApi.updateBuilding(editingId, editing);
+        flash(`+ Saved ${editing.name}`);
+      } else {
+        await adminApi.createBuilding(editing);
+        flash(`+ Saved ${editing.name} — open the Map tab to place it`);
+      }
       setEditing(null);
       setEditingId(null);
       await reload();
@@ -764,6 +889,7 @@ function BuildingsTab({
               <th className="py-2">District</th>
               <th className="py-2">Owner</th>
               <th className="py-2">Status</th>
+              <th className="py-2">Placement</th>
               <th className="py-2">Functions</th>
               <th className="py-2 text-right">Actions</th>
             </tr>
@@ -775,6 +901,15 @@ function BuildingsTab({
                 <td className="py-2 text-heliora-text-dim">{districtName(b.districtId)}</td>
                 <td className="py-2 text-heliora-yellow">{b.ownerType}</td>
                 <td className="py-2">{b.status}</td>
+                <td className="py-2 text-xs">
+                  {b.gridX != null && b.gridY != null ? (
+                    <span className="text-heliora-cyan">
+                      ({b.gridX},{b.gridY})
+                    </span>
+                  ) : (
+                    <span className="text-heliora-yellow">Unplaced</span>
+                  )}
+                </td>
                 <td className="py-2 text-xs text-heliora-text-dim">
                   {(b.functionality ?? []).join(', ') || '-'}
                 </td>
@@ -787,7 +922,7 @@ function BuildingsTab({
                 </td>
               </tr>
             ))}
-            {buildings.length === 0 && <EmptyRow cols={6} message="No buildings yet." />}
+            {buildings.length === 0 && <EmptyRow cols={7} message="No buildings yet." />}
           </tbody>
         </table>
       </section>
