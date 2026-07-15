@@ -32,14 +32,7 @@ All eight roadmap items shipped — see **Shipped** below. Next candidates are i
 
 ## Also queued (pre-existing, still wanted)
 
-### Replayable Ticks
-Persist random seeds per tick and expose replay tooling for balance testing.
-
-**Files to edit:**
-- `apps/api/src/modules/simulation/simulation.service.ts` — generate and store a `randomSeed` per tick in `SimulationHistory`
-- `prisma/schema.prisma` — add `seed` field to `SimulationHistory`
-- `packages/game-rules/src/` — all outcome functions already accept optional `randomSeed`; wire them through
-- `apps/admin/` — add a "Replay tick" button that re-runs a historical tick with the same seed
+Everything from this queue has shipped — see **Shipped**. Next candidates live in "Future Ideas".
 
 ---
 
@@ -72,6 +65,7 @@ Run the BullMQ worker (`apps/worker`) through Docker Compose for sharded backgro
 
 ## Shipped
 
+- **Replayable Ticks** (2026-07-15) — Every tick now generates and persists a `randomSeed` (`SimulationTick.randomSeed`, migration `20260715150000_replayable_ticks`). Stock pricing is fully seeded: each corporation's move uses `deriveSubSeed(tickSeed, corporationId)` (FNV-hash sub-seed in `packages/game-rules/src/stock-prices.ts`), and the tick's `results` store the exact pricing inputs (`corporation-pricing` entries: price, volatility, full-precision drift, outcome). `POST /simulation/replay/:tickId` (admin-guarded) dry-runs the pricing math from the stored seed + inputs and reports per-corporation match/mismatch — verified live: 4/4 price moves reproduce exactly. The admin overview's tick history has a REPLAY button per tick showing "✓ Deterministic" or divergence details; pre-upgrade ticks report "not replayable" gracefully. 3 new sub-seed specs.
 - **Faction Wars** (2026-07-15) — Districts actually change hands now. New `faction_wars` tick step (`advanceFactionWars` in `simulation.service.ts`, pure contest logic in `packages/game-rules/src/faction-wars.ts`): each district has a 20% chance per tick of being contested; faction presence = relative influence share (scale-invariant, so runaway absolute influence can't sweep the map) × local-asset weight (faction-owned buildings in the district ×0.6, on the planet ×0.2) × ±15% jitter. Neutral districts fall to the strongest faction past a threshold; incumbents are only unseated when a challenger beats them by 1.35× (hysteresis prevents thrashing — verified over live ticks: initial land-grab, then rare contested flips). Flips persist `district.controllingFactionId` (feeding the existing travel standing checks/surcharges/lockouts), log a world activity entry, and stream into the dashboard World Feed ("⚑ Coil Union wrested control of Glasswater Central…"). Travel page district chips now show the controlling faction. 8 faction-wars specs (game-rules).
 - **Player Housing** (2026-07-15) — Rent the safehouse you're standing in (`POST /characters/:id/housing/rent`; daily rent from `calculateDailyRent` in `packages/game-rules/src/housing.ts`: 20 + economy×6 − danger×3, min 20 — prosperous districts cost more, dangerous ones discount). Benefits: **no passive energy decay while housed** (the decay clock still advances so ending a lease never back-charges), **wanted −1 on every paid rent day** (laying low), and **item storage** — store/retrieve requires standing inside your safehouse (`.../items/:itemId/store|retrieve`, new `HOUSING` item-owner type; equipped items must be unequipped first). The world tick gained a `housing_rent` step: due periods are settled one by one and the first unaffordable day **evicts** you, returning all stored items to your pack. Cancel anytime (`.../housing/cancel`) with items returned. Dashboard Location panel shows a rent offer inside safehouses, and lease status / next-rent countdown / storage with RETRIEVE buttons once housed; inventory items get a STORE button at your safehouse. `HOUSING_RENTED`/`HOUSING_ENDED`/`RENT_PAID` activity types. Model `CharacterHousing` (migration `20260715140000_player_housing`); 7 housing specs (game-rules).
 - **Roadmap 8: Engagement polish** (2026-07-15) — `useEventStream` now reconnects with exponential backoff (1s→30s) and returns a connection status. The dashboard gained a **World Feed** panel with a live/reconnecting indicator that finally consumes the `npc.activity.recorded` and `travel.completed` SSE events the backend was already broadcasting — NPC crews and rival operators visibly move while you watch. Launch hygiene: the login page no longer pre-fills or displays the test credentials.

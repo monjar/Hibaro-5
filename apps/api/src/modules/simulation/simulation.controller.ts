@@ -1,6 +1,17 @@
-import { Controller, Get, MessageEvent, Post, Query, Sse } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  MessageEvent,
+  NotFoundException,
+  Param,
+  Post,
+  Query,
+  Sse,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Observable } from 'rxjs';
+import { AdminGuard } from '../auth/admin.guard';
 import { RealtimeService } from '../realtime/realtime.service';
 import { SimulationService } from './simulation.service';
 
@@ -28,6 +39,17 @@ export class SimulationController {
   @ApiOperation({ summary: 'Get recent simulation tick history' })
   history(@Query('limit') limit = '10') {
     return this.simulationService.getHistory(parseInt(limit, 10));
+  }
+
+  @Post('replay/:tickId')
+  @UseGuards(AdminGuard)
+  @ApiOperation({ summary: 'Dry-run replay of a tick\'s seeded stock pricing (admin)' })
+  async replay(@Param('tickId') tickId: string) {
+    const result = await this.simulationService.replayTick(tickId);
+    if (!result.found) {
+      throw new NotFoundException(`Tick ${tickId} not found`);
+    }
+    return result;
   }
 
   @Get('realtime-contracts')

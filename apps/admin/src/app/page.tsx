@@ -7,6 +7,7 @@ import {
   type DistrictControlState,
   type NpcActivityEntry,
   type SimulationTickSummary,
+  type TickReplayResult,
   type WorldState,
 } from '@heliora/platform-sdk';
 import { AdminShell } from '../components/AdminShell';
@@ -25,6 +26,28 @@ export default function AdminPage() {
   const [worldState, setWorldState] = useState<WorldState | null>(null);
   const [history, setHistory] = useState<SimulationTickSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [replaying, setReplaying] = useState<string | null>(null);
+  const [replayResults, setReplayResults] = useState<Record<string, TickReplayResult>>({});
+
+  async function replayTick(tickId: string) {
+    setReplaying(tickId);
+    try {
+      const result = await adminApi.replaySimulationTick(tickId);
+      setReplayResults((prev) => ({ ...prev, [tickId]: result }));
+    } catch (error) {
+      setReplayResults((prev) => ({
+        ...prev,
+        [tickId]: {
+          found: true,
+          replayable: false,
+          tickId,
+          reason: (error as Error).message,
+        },
+      }));
+    } finally {
+      setReplaying(null);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -114,10 +137,38 @@ export default function AdminPage() {
                         {tick.totals.npcActions}
                       </p>
                     </div>
-                    <div className="text-xs text-heliora-text-dim">
-                      {tick.stepSummaries.length} steps
+                    <div className="flex items-center gap-2 text-xs text-heliora-text-dim">
+                      <span>{tick.stepSummaries.length} steps</span>
+                      {tick.id && (
+                        <button
+                          onClick={() => void replayTick(tick.id as string)}
+                          disabled={replaying !== null}
+                          className="rounded border border-heliora-cyan/50 px-2 py-0.5 font-mono text-heliora-cyan hover:bg-heliora-cyan/10 disabled:opacity-40"
+                          title="Recompute this tick's seeded stock pricing and verify it reproduces exactly"
+                        >
+                          {replaying === tick.id ? 'REPLAYING…' : 'REPLAY'}
+                        </button>
+                      )}
                     </div>
                   </div>
+                  {tick.id && replayResults[tick.id] && (
+                    <div
+                      className={`mt-2 rounded border px-3 py-2 text-xs ${
+                        replayResults[tick.id].deterministic
+                          ? 'border-heliora-green/50 bg-heliora-green/10 text-heliora-green'
+                          : 'border-heliora-yellow/50 bg-heliora-yellow/10 text-heliora-yellow'
+                      }`}
+                    >
+                      {replayResults[tick.id].replayable === false
+                        ? `Not replayable: ${replayResults[tick.id].reason}`
+                        : replayResults[tick.id].deterministic
+                          ? `✓ Deterministic — ${replayResults[tick.id].entries?.length ?? 0} corporation price moves reproduced exactly (seed ${replayResults[tick.id].randomSeed?.toFixed(6)})`
+                          : `⚠ Mismatch — ${
+                              replayResults[tick.id].entries?.filter((entry) => !entry.matches)
+                                .length ?? 0
+                            } of ${replayResults[tick.id].entries?.length ?? 0} price moves diverged`}
+                    </div>
+                  )}
                   <div className="mt-3 grid gap-2 md:grid-cols-2">
                     {tick.stepSummaries.map((step) => (
                       <div

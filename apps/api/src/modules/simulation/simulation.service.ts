@@ -4,6 +4,7 @@ import { REALTIME_EVENT_CONTRACTS } from '@heliora/platform-sdk';
 import {
   FACTION_WAR_CONTEST_CHANCE,
   computeNextStockPrice,
+  deriveSubSeed,
   evaluateRentCycle,
   factionPresenceScore,
   resolveDistrictContest,
@@ -28,11 +29,13 @@ export class SimulationService {
 
   async tick() {
     const now = new Date();
+    // Stored with the tick so seeded steps (stock pricing) can be replayed.
+    const tickSeed = Math.random();
 
     const opportunityResults = await this.resolveDueOpportunities(now);
     const worldEvents = await this.syncWorldEvents(now);
     const economy = await this.advanceEconomy();
-    const corporations = await this.advanceCorporations();
+    const corporations = await this.advanceCorporations(tickSeed);
     const factionWars = await this.advanceFactionWars();
     const districtControl = await this.buildDistrictControlState();
     const energyDecay = await this.applyEnergyDecay(now);
@@ -124,6 +127,7 @@ export class SimulationService {
       { type: 'world-events', activated: worldEvents.activated, resolved: worldEvents.resolved },
       { type: 'economy', updates: economy.updated },
       { type: 'corporations', updates: corporations.updated },
+      { type: 'corporation-pricing', entries: corporations.pricingEntries },
       { type: 'energy-decay', changed: energyDecay.changed, totalEnergyLost: energyDecay.totalEnergyLost },
       ...npcActivity.actions,
     ];
@@ -148,6 +152,7 @@ export class SimulationService {
         processedAt: now,
         summary: summary as Prisma.JsonObject,
         results: results as Prisma.JsonArray,
+        randomSeed: tickSeed,
       },
     });
 
@@ -258,6 +263,57 @@ export class SimulationService {
     }
 
     return { contested, flips };
+  }
+
+  /**
+   * Dry-run replay of a historical tick's seeded stock pricing: recompute
+   * every corporation's price move from the stored inputs and seed, and
+   * compare with what the tick actually produced. Nothing is persisted.
+   */
+  async replayTick(tickId: string) {
+    const tick = await this.prisma.simulationTick.findUnique({ where: { id: tickId } });
+    if (!tick) {
+      return { found: false as const, tickId };
+    }
+    if (tick.randomSeed === null || tick.randomSeed === undefined) {
+      return {
+        found: true as const,
+        tickId,
+        replayable: false as const,
+        reason: 'Tick predates seed storage — only ticks recorded after the upgrade can replay',
+      };
+    }
+
+    const results = Array.isArray(tick.results) ? (tick.results as Array<any>) : [];
+    const pricing = results.find((entry) => entry?.type === 'corporation-pricing');
+    const entries: Array<any> = Array.isArray(pricing?.entries) ? pricing.entries : [];
+
+    const replayedEntries = entries.map((entry) => {
+      const move = computeNextStockPrice({
+        currentPrice: Number(entry.inputPrice),
+        volatility: Number(entry.volatility),
+        drift: Number(entry.drift),
+        randomSeed: deriveSubSeed(tick.randomSeed as number, String(entry.corporationId)),
+      });
+      return {
+        corporationId: entry.corporationId,
+        name: entry.name,
+        inputPrice: entry.inputPrice,
+        storedNextPrice: entry.nextPrice,
+        replayedNextPrice: move.nextPrice,
+        matches: move.nextPrice === entry.nextPrice,
+      };
+    });
+
+    return {
+      found: true as const,
+      replayable: true as const,
+      tickId,
+      randomSeed: tick.randomSeed,
+      processedAt: tick.processedAt,
+      deterministic: replayedEntries.every((entry) => entry.matches),
+      entries: replayedEntries,
+    };
   }
 
   async getHistory(limit = 10) {
@@ -496,7 +552,7 @@ export class SimulationService {
     };
   }
 
-  private async advanceCorporations() {
+  private async advanceCorporations(tickSeed?: number) {
     const [corporations, planets, employments, activeEvents] = await Promise.all([
       this.prisma.corporation.findMany(),
       this.prisma.planet.findMany(),
@@ -517,6 +573,7 @@ export class SimulationService {
       : 5;
 
     let updated = 0;
+    const pricingEntries: Array<Record<string, unknown>> = [];
     for (const corporation of corporations) {
       const activeEventPressure = activeEvents.filter(
         (event) =>
@@ -566,8 +623,19 @@ export class SimulationService {
         currentPrice: corporation.stockPrice ?? 40,
         volatility: stockVolatility,
         drift,
+        randomSeed:
+          tickSeed !== undefined ? deriveSubSeed(tickSeed, corporation.id) : undefined,
       });
       const stockPrice = move.nextPrice;
+      pricingEntries.push({
+        corporationId: corporation.id,
+        name: corporation.name,
+        inputPrice: corporation.stockPrice ?? 40,
+        volatility: stockVolatility,
+        // Full precision — replay must reproduce the exact computation.
+        drift,
+        nextPrice: stockPrice,
+      });
 
       const status = deriveCorporationStatus(riskOfBankruptcy, cash, debt);
 
@@ -596,6 +664,7 @@ export class SimulationService {
       processed: corporations.length,
       updated,
       notes: ['Applied price movement rules and bankruptcy pressure'],
+      pricingEntries,
     };
   }
 

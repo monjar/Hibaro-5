@@ -34,6 +34,22 @@ function mulberry32(seed: number): () => number {
 export const PRICE_FLOOR = 1;
 export const MAX_TICK_PERCENT_MOVE = 0.25;
 
+/**
+ * Derive a stable per-entity seed in [0, 1) from a tick-level seed and an
+ * entity key, so one stored seed can deterministically replay every
+ * entity's roll in that tick.
+ */
+export function deriveSubSeed(seed: number, key: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i += 1) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const keyFraction = (hash >>> 0) / 4294967296;
+  const combined = (seed % 1) + keyFraction;
+  return combined - Math.floor(combined);
+}
+
 export function computeNextStockPrice(input: PriceMovementInput): PriceMovementResult {
   const rand = input.randomSeed !== undefined ? mulberry32(input.randomSeed)() : Math.random();
   // Map [0,1) → [-1, 1] for symmetric jitter.

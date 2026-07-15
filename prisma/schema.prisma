@@ -671,5 +671,6 @@ model SimulationTick {
   processedAt DateTime @default(now())
   summary     Json
   results     Json?
+  randomSeed  Float?
   createdAt   DateTime @default(now())
 }

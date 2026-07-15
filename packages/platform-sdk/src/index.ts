@@ -782,6 +782,26 @@ export interface SimulationStepSummary {
   notes?: string[];
 }
 
+export interface TickReplayEntry {
+  corporationId: string;
+  name: string;
+  inputPrice: number;
+  storedNextPrice: number;
+  replayedNextPrice: number;
+  matches: boolean;
+}
+
+export interface TickReplayResult {
+  found: boolean;
+  replayable?: boolean;
+  reason?: string;
+  tickId: string;
+  randomSeed?: number;
+  processedAt?: string;
+  deterministic?: boolean;
+  entries?: TickReplayEntry[];
+}
+
 export interface SimulationTickSummary {
   id?: string;
   processedAt: string;
@@ -1092,6 +1112,8 @@ export function createApiClient(config?: ApiClientConfig) {
     deleteOpportunity: (id: string) =>
       request<{ deleted: boolean; id: string }>(`/opportunities/${id}`, { method: 'DELETE' }),
     runSimulationTick: () => post<SimulationTickSummary>('/simulation/tick'),
+    replaySimulationTick: (tickId: string) =>
+      post<TickReplayResult>(`/simulation/replay/${tickId}`),
     getSolarSystems: () => request<SolarSystem[]>('/locations/solar-systems'),
     getPlanets: () => request<AdminPlanet[]>('/locations/planets'),
     getPlanet: (id: string) => request<AdminPlanet>(`/locations/planets/${id}`),
