@@ -921,6 +921,32 @@ export interface AchievementClaimResult {
   levelUp: { level: number; statPointsGained: number } | null;
 }
 
+export interface CraftingRecipeView {
+  id: string;
+  name: string;
+  description: string;
+  output: { itemName: string; quantity: number };
+  inputs: Array<{ itemName: string; quantity: number }>;
+  creditsCost: number;
+  energyCost: number;
+  statRequirement: { key: string; min: number };
+  xpReward: number;
+  canCraft: boolean;
+  reasons: string[];
+}
+
+export interface CraftingRecipesView {
+  atWorkshop: boolean;
+  recipes: CraftingRecipeView[];
+}
+
+export interface CraftResult {
+  crafted: string;
+  quantity: number;
+  xpGained: number;
+  levelUp: { level: number; statPointsGained: number } | null;
+}
+
 export interface NearbyPlayer {
   id: string;
   name: string;
@@ -1287,6 +1313,11 @@ export function createApiClient(config?: ApiClientConfig) {
       request<AchievementView[]>(`/players/${playerId}/achievements`),
     claimAchievement: (playerId: string, achievementId: string) =>
       post<AchievementClaimResult>(`/players/${playerId}/achievements/${achievementId}/claim`),
+    // crafting
+    getCraftingRecipes: (characterId: string) =>
+      request<CraftingRecipesView>(`/crafting/recipes/${characterId}`),
+    craftRecipe: (characterId: string, recipeId: string) =>
+      post<CraftResult>('/crafting/craft', { characterId, recipeId }),
     // pvp
     getLeaderboard: () => request<LeaderboardRow[]>('/pvp/leaderboard'),
     getNearbyPlayers: (characterId: string) =>

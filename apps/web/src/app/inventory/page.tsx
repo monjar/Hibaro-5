@@ -6,7 +6,7 @@ import { useAuthGuard } from '@/lib/session-context';
 import { useCharacter } from '@/lib/use-character';
 import { Panel } from '@/components/Panel';
 import { describeItemFeatures, formatUiError } from '@/lib/ui-presenters';
-import type { HousingView, InventoryItem } from '@heliora/platform-sdk';
+import type { CraftingRecipesView, HousingView, InventoryItem } from '@heliora/platform-sdk';
 
 const RARITY_COLORS: Record<string, string> = {
   COMMON: 'text-heliora-text',
@@ -32,6 +32,7 @@ export default function InventoryPage() {
   const { character, refresh } = useCharacter();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [housing, setHousing] = useState<HousingView | null>(null);
+  const [crafting, setCrafting] = useState<CraftingRecipesView | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -40,12 +41,14 @@ export default function InventoryPage() {
     if (!session.characterId) return;
     setLoading(true);
     try {
-      const [data, housingView] = await Promise.all([
+      const [data, housingView, craftingView] = await Promise.all([
         api.getCharacterInventory(session.characterId),
         api.getCharacterHousing(session.characterId).catch(() => null),
+        api.getCraftingRecipes(session.characterId).catch(() => null),
       ]);
       setItems(data);
       setHousing(housingView);
+      setCrafting(craftingView);
     } finally {
       setLoading(false);
     }
@@ -69,6 +72,25 @@ export default function InventoryPage() {
     } finally {
       setBusy(null);
       setTimeout(() => setMessage(''), 3500);
+    }
+  }
+
+  async function craft(recipeId: string) {
+    if (!session.characterId) return;
+    setBusy(`craft:${recipeId}`);
+    setMessage('');
+    try {
+      const result = await api.craftRecipe(session.characterId, recipeId);
+      const levelNote = result.levelUp ? ` · ⬆ LEVEL UP! Now level ${result.levelUp.level}` : '';
+      setMessage(
+        `✅ Crafted ${result.quantity}× ${result.crafted} (+${result.xpGained} XP)${levelNote}`,
+      );
+      await Promise.all([reload(), refresh()]);
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setBusy(null);
+      setTimeout(() => setMessage(''), 6000);
     }
   }
 
@@ -234,6 +256,60 @@ export default function InventoryPage() {
           </div>
         )}
       </Panel>
+
+      {crafting && (
+        <Panel
+          title={`Workshop${crafting.atWorkshop ? '' : ' — no workbench here'}`}
+          accent="orange"
+        >
+          {!crafting.atWorkshop && (
+            <p className="mb-3 text-xs text-heliora-text-dim">
+              Crafting needs a workshop: any <span className="text-heliora-orange">warehouse</span>
+              , or <span className="text-heliora-orange">your own rented safehouse</span>. Recipes
+              below show what you could make.
+            </p>
+          )}
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            {crafting.recipes.map((recipe) => (
+              <div
+                key={recipe.id}
+                className={`rounded border p-2 ${
+                  recipe.canCraft
+                    ? 'border-heliora-orange/60 bg-heliora-orange/10'
+                    : 'border-heliora-border bg-heliora-dark opacity-80'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-sm font-bold text-heliora-text">
+                      🔧 {recipe.name} → {recipe.output.quantity}× {recipe.output.itemName}
+                    </div>
+                    <p className="truncate text-xs text-heliora-text-dim">{recipe.description}</p>
+                  </div>
+                  <button
+                    onClick={() => void craft(recipe.id)}
+                    disabled={busy !== null || !recipe.canCraft}
+                    className="shrink-0 rounded border border-heliora-orange/60 bg-heliora-orange/20 px-3 py-1 text-xs font-mono font-bold text-heliora-orange hover:bg-heliora-orange/30 disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    {busy === `craft:${recipe.id}` ? '…' : 'CRAFT'}
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] font-mono text-heliora-text-dim">
+                  {recipe.inputs
+                    .map((input) => `${input.quantity}× ${input.itemName}`)
+                    .join(' + ')}{' '}
+                  + ${recipe.creditsCost} · ⚡{recipe.energyCost} ·{' '}
+                  {recipe.statRequirement.key.slice(0, 3).toUpperCase()} ≥{' '}
+                  {recipe.statRequirement.min} · +{recipe.xpReward} XP
+                </p>
+                {!recipe.canCraft && recipe.reasons.length > 0 && (
+                  <p className="mt-1 text-[11px] text-heliora-red/80">{recipe.reasons[0]}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
 
       {character?.currentBuilding &&
         Array.isArray(character.currentBuilding.functionality) &&

@@ -220,6 +220,7 @@ enum ActivityType {
   HOUSING_RENTED
   HOUSING_ENDED
   RENT_PAID
+  ITEM_CRAFTED
 }
 
 enum JobEmploymentStatus {

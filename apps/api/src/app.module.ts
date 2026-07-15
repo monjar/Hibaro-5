@@ -17,6 +17,7 @@ import { ShopsModule } from './modules/shops/shops.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { PvpModule } from './modules/pvp/pvp.module';
+import { CraftingModule } from './modules/crafting/crafting.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { PvpModule } from './modules/pvp/pvp.module';
     JobsModule,
     RealtimeModule,
     PvpModule,
+    CraftingModule,
   ],
 })
 export class AppModule {}
