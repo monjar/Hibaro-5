@@ -88,11 +88,40 @@ export interface Player {
   character?: Character;
 }
 
+export interface OpportunityDecisionEffects {
+  rollBonus?: number;
+  creditsBonus?: number;
+  wantedDelta?: number;
+  healthDelta?: number;
+  note?: string;
+}
+
+export interface OpportunityTimelineChoice {
+  id: string;
+  label: string;
+  costCredits?: number;
+  statCheck?: { stat: string; dc: number };
+  effects?: OpportunityDecisionEffects;
+  failEffects?: OpportunityDecisionEffects;
+}
+
 export interface OpportunityTimelineEvent {
   minute: number;
   description?: string;
   successDescription?: string;
   failureDescription?: string;
+  choices?: OpportunityTimelineChoice[];
+}
+
+export interface OpportunityDecisionRecord {
+  minute: number;
+  choiceId: string;
+  checkRoll?: number;
+  checkTotal?: number;
+  checkDc?: number;
+  checkPassed?: boolean;
+  appliedEffects: OpportunityDecisionEffects;
+  decidedAt: string;
 }
 
 export interface OpportunityDefinition {
@@ -1059,6 +1088,11 @@ export function createApiClient(config?: ApiClientConfig) {
       post<OpportunityInstance>(`/opportunities/${opportunityId}/accept`, { characterId }),
     resolveOpportunity: (instanceId: string) =>
       post<OpportunityInstance>(`/opportunities/instances/${instanceId}/resolve`),
+    decideOpportunity: (instanceId: string, minute: number, choiceId: string) =>
+      post<{ instance: OpportunityInstance; decision: OpportunityDecisionRecord }>(
+        `/opportunities/instances/${instanceId}/decide`,
+        { minute, choiceId },
+      ),
     getStockHoldings: (characterId: string) =>
       request<StockHolding[]>(`/stocks/holdings/${characterId}`),
     buyStock: (characterId: string, corporationId: string, shares: number) =>

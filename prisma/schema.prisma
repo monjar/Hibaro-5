@@ -207,6 +207,7 @@ enum ActivityType {
   LOCATION_CHANGED
   LEVEL_UP
   STAT_TRAINED
+  DECISION_MADE
 }
 
 enum JobEmploymentStatus {

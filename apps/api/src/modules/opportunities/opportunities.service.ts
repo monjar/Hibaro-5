@@ -11,15 +11,21 @@ import {
   RequirementContext,
   Reward as GameRulesReward,
   Risk as GameRulesRisk,
+  DecisionRecord,
   STAT_CAP,
+  TimelineChoice,
   aggregateEquipmentBonuses,
   applyEquipmentBonuses,
   applyXpGain,
   calculateOpportunityEnergyCost,
   calculateOpportunitySuccessChance,
   checkRequirements,
+  computeFinalSuccess,
   getOpportunityCheckProfile,
+  resolveChoice,
   rollOpportunityCheck,
+  totalDecisionCreditsBonus,
+  totalDecisionRollBonus,
   xpRewardForOpportunity,
 } from '@heliora/game-rules';
 import { ActivityType, OpportunityType, RelationshipType } from '@prisma/client';
@@ -64,6 +70,7 @@ type OpportunityTimelineEvent = {
   description?: string;
   successDescription?: string;
   failureDescription?: string;
+  choices?: TimelineChoice[];
 };
 
 type PlannedOutcome = {
@@ -81,6 +88,7 @@ type OpportunityProgress = {
   plannedOutcome?: PlannedOutcome;
   rest?: RestProgress;
   energyCost?: number;
+  decisions?: DecisionRecord[];
 };
 
 type RestProfileInput = {
@@ -477,6 +485,119 @@ export class OpportunitiesService {
     return this.resolveInstanceInternal(instance);
   }
 
+  async decideInstance(instanceId: string, playerId: string, minute: number, choiceId: string) {
+    const instance = await this.prisma.opportunityInstance.findUnique({
+      where: { id: instanceId },
+      include: { definition: true, character: true },
+    });
+    if (!instance) throw new NotFoundException(`Instance ${instanceId} not found`);
+    if (instance.character.playerId !== playerId) {
+      throw new ForbiddenException('You can only make decisions on your own activities');
+    }
+    if (instance.status !== 'IN_PROGRESS' && instance.status !== 'ACCEPTED') {
+      throw new BadRequestException('This activity is no longer in progress');
+    }
+    if (this.isRestDefinitionId(instance.definitionId)) {
+      throw new BadRequestException('Rest has no decision points');
+    }
+
+    const timelineEvents = Array.isArray(instance.definition.timelineEvents)
+      ? (instance.definition.timelineEvents as unknown as OpportunityTimelineEvent[])
+      : [];
+    const event = timelineEvents.find(
+      (entry) => entry.minute === minute && Array.isArray(entry.choices) && entry.choices.length,
+    );
+    if (!event) {
+      throw new NotFoundException(`No decision point at minute ${minute}`);
+    }
+
+    const elapsedMinutes = Math.floor(
+      (Date.now() - new Date(instance.startedAt).getTime()) / 60_000,
+    );
+    if (elapsedMinutes < minute) {
+      throw new BadRequestException('This decision point has not come up yet');
+    }
+
+    const progress = this.readProgress(instance.progress) ?? {};
+    const decisions = progress.decisions ?? [];
+    if (decisions.some((decision) => decision.minute === minute)) {
+      throw new BadRequestException('You already made this call');
+    }
+
+    const choice = (event.choices ?? []).find((entry) => entry.id === choiceId);
+    if (!choice) {
+      throw new BadRequestException(`Unknown choice: ${choiceId}`);
+    }
+
+    const character = instance.character;
+    const cost = choice.costCredits ?? 0;
+    if (cost > 0 && character.credits < cost) {
+      throw new BadRequestException(
+        `You need ${cost} credits for that (current: ${Math.floor(character.credits)})`,
+      );
+    }
+
+    const effectiveStats = await this.getEffectiveStats(character);
+    const resolution = resolveChoice(choice, effectiveStats);
+    const effects = resolution.appliedEffects;
+
+    const characterUpdates: Record<string, number> = {};
+    if (cost > 0) {
+      characterUpdates.credits = this.roundCredits(character.credits - cost);
+    }
+    if (effects.wantedDelta) {
+      characterUpdates.wantedLevel = Math.max(0, character.wantedLevel + effects.wantedDelta);
+    }
+    if (effects.healthDelta) {
+      characterUpdates.health = Math.min(
+        character.maxHealth,
+        Math.max(0, character.health + effects.healthDelta),
+      );
+    }
+    if (Object.keys(characterUpdates).length > 0) {
+      await this.prisma.character.update({ where: { id: character.id }, data: characterUpdates });
+    }
+
+    const record: DecisionRecord = {
+      minute,
+      choiceId,
+      checkRoll: resolution.checkRoll,
+      checkTotal: resolution.checkTotal,
+      checkDc: resolution.checkDc,
+      checkPassed: resolution.checkPassed,
+      appliedEffects: effects,
+      decidedAt: new Date().toISOString(),
+    };
+
+    const updatedInstance = await this.prisma.opportunityInstance.update({
+      where: { id: instanceId },
+      data: {
+        progress: { ...progress, decisions: [...decisions, record] } as never,
+      },
+      include: { definition: true },
+    });
+
+    if (character.playerId) {
+      const checkNote =
+        resolution.checkPassed === undefined
+          ? ''
+          : resolution.checkPassed
+            ? ' (check passed)'
+            : ' (check failed)';
+      await this.prisma.activityLog.create({
+        data: {
+          playerId: character.playerId,
+          characterId: character.id,
+          type: 'DECISION_MADE',
+          message: `${character.name} made a call during ${instance.definition.title}: ${choice.label}${checkNote}`,
+          relatedEntities: { instanceId, minute, choiceId, decision: record as never },
+        },
+      });
+    }
+
+    return { instance: updatedInstance, decision: record };
+  }
+
   async resolveInstanceInternal(instance: any) {
     const { definition, character } = instance;
     const now = new Date();
@@ -509,7 +630,20 @@ export class OpportunitiesService {
         }
       : rollOpportunityCheck(rulesCharacter, rulesDefinition);
     const checkProfile = getOpportunityCheckProfile(rulesCharacter, rulesDefinition);
-    const success = check.success;
+
+    // Mid-activity decisions can shift the final result either way.
+    const decisions = this.readProgress(instance.progress)?.decisions ?? [];
+    const decisionRollBonus = totalDecisionRollBonus(decisions);
+    const decisionCreditsBonus = totalDecisionCreditsBonus(decisions);
+    const finalCheck = computeFinalSuccess(
+      {
+        roll: check.d20Roll,
+        checkTotal: check.checkTotal,
+        difficultyClass: check.difficultyClass,
+      },
+      decisionRollBonus,
+    );
+    const success = decisionRollBonus !== 0 ? finalCheck.success : check.success;
 
     const rewards = definition.rewards as any[];
     const risks = definition.risks as any[];
@@ -517,6 +651,13 @@ export class OpportunitiesService {
     const appliedRisks: any[] = [];
 
     const characterUpdates: any = {};
+
+    if (success && decisionCreditsBonus > 0) {
+      characterUpdates.credits = this.roundCredits(
+        (character.credits ?? 0) + decisionCreditsBonus,
+      );
+      appliedRewards.push({ type: 'CREDITS', value: decisionCreditsBonus, source: 'DECISION' });
+    }
 
     if (success) {
       for (const reward of rewards) {
@@ -707,6 +848,16 @@ export class OpportunitiesService {
       checkLabel: checkProfile.label,
       appliedRewards,
       appliedRisks,
+      decisionSummary:
+        decisions.length > 0
+          ? {
+              count: decisions.length,
+              rollBonus: decisionRollBonus,
+              creditsBonus: decisionCreditsBonus,
+              adjustedTotal: finalCheck.adjustedTotal,
+              rescued: decisionRollBonus !== 0 && finalCheck.success && !check.success,
+            }
+          : null,
       progression: {
         xpGained,
         totalXp: progression.xp,

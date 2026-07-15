@@ -16,6 +16,7 @@ import {
 } from '@/lib/ui-presenters';
 import {
   getAcceptedDescription,
+  getPendingDecisionEvent,
   getRestProgress,
   getTimelineEventDescription,
   isRestActivity,
@@ -39,6 +40,7 @@ export default function OpportunitiesPage() {
   const [accepting, setAccepting] = useState<string | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
   const [hiringFor, setHiringFor] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const now = useNow();
   const rewardReferenceLookup = useRewardReferenceLookup();
@@ -111,6 +113,25 @@ export default function OpportunitiesPage() {
     } finally {
       setHiringFor(null);
       setTimeout(() => setMessage(''), 4500);
+    }
+  }
+
+  async function decide(instanceId: string, minute: number, choiceId: string) {
+    setDeciding(`${instanceId}:${minute}:${choiceId}`);
+    setMessage('');
+    try {
+      const result = await api.decideOpportunity(instanceId, minute, choiceId);
+      const effects = result.decision.appliedEffects;
+      const bonusNote = effects.rollBonus
+        ? ` (${effects.rollBonus > 0 ? '+' : ''}${effects.rollBonus} to the final check)`
+        : '';
+      setMessage(`✅ ${effects.note ?? 'Call made.'}${bonusNote}`);
+      await refresh();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setDeciding(null);
+      setTimeout(() => setMessage(''), 7000);
     }
   }
 
@@ -480,6 +501,7 @@ export default function OpportunitiesPage() {
               const rest = getRestProgress(inst);
               const acceptedDescription = getAcceptedDescription(inst);
               const timelineEvent = getTimelineEventDescription(inst, now);
+              const pendingDecision = isRest ? null : getPendingDecisionEvent(inst, now);
               const remaining = Math.max(
                 0,
                 Math.floor((completesAtMs - now) / 1000),
@@ -546,6 +568,44 @@ export default function OpportunitiesPage() {
                         Live update
                       </span>
                       {timelineEvent}
+                    </div>
+                  )}
+                  {pendingDecision && (
+                    <div className="mt-2 rounded border border-heliora-yellow/50 bg-heliora-yellow/10 px-3 py-2">
+                      <div className="mb-1 text-xs font-mono font-bold uppercase tracking-wider text-heliora-yellow">
+                        ⚠ Decision needed
+                      </div>
+                      {pendingDecision.description && (
+                        <p className="mb-2 text-xs text-heliora-text">{pendingDecision.description}</p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {(pendingDecision.choices ?? []).map((choice) => {
+                          const busyKey = `${inst.id}:${pendingDecision.minute}:${choice.id}`;
+                          const unaffordable =
+                            (choice.costCredits ?? 0) > (character?.credits ?? 0);
+                          return (
+                            <button
+                              key={choice.id}
+                              onClick={() => void decide(inst.id, pendingDecision.minute, choice.id)}
+                              disabled={deciding !== null || unaffordable}
+                              title={
+                                unaffordable
+                                  ? `Needs $${choice.costCredits}`
+                                  : choice.statCheck
+                                    ? `${choice.statCheck.stat} check vs DC ${choice.statCheck.dc}`
+                                    : undefined
+                              }
+                              className="rounded border border-heliora-yellow/60 bg-heliora-dark px-3 py-1 text-xs font-mono text-heliora-yellow transition-colors hover:bg-heliora-yellow/20 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {deciding === busyKey ? '…' : choice.label}
+                              {choice.costCredits ? ` ($${choice.costCredits})` : ''}
+                              {choice.statCheck
+                                ? ` [${choice.statCheck.stat.slice(0, 3).toUpperCase()} DC ${choice.statCheck.dc}]`
+                                : ''}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                   {isRest && rest && (

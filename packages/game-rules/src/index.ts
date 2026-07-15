@@ -11,3 +11,4 @@ export * from './stock-prices';
 export * from './activity-costs';
 export * from './progression';
 export * from './equipment';
+export * from './decisions';
