@@ -14,3 +14,4 @@ export * from './equipment';
 export * from './decisions';
 export * from './pvp';
 export * from './retention';
+export * from './housing';

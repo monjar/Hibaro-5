@@ -6,6 +6,8 @@ export type SimulationStepName =
   | 'economy'
   | 'corporations'
   | 'district_control'
+  | 'energy_decay'
+  | 'housing_rent'
   | 'npc_activity'
   | 'job_shifts';
 
@@ -840,6 +842,30 @@ export const REALTIME_EVENT_CONTRACTS: RealtimeEventContract[] = [
   },
 ];
 
+export interface CharacterHousing {
+  id: string;
+  characterId: string;
+  buildingId: string;
+  rentPerDay: number;
+  nextRentDueAt: string;
+  status: 'ACTIVE' | 'ENDED' | 'EVICTED';
+  totalRentPaid: number;
+  createdAt: string;
+  building?: {
+    id: string;
+    name: string;
+    district?: { id: string; name: string; planet?: { id: string; name: string } };
+  };
+}
+
+export interface HousingView {
+  housing: CharacterHousing | null;
+  storedItems: InventoryItem[];
+  canRentHere: boolean;
+  rentQuote: { buildingId: string; buildingName: string; rentPerDay: number } | null;
+  atHousingBuilding?: boolean;
+}
+
 export interface DailyStatus {
   canClaim: boolean;
   currentStreak: number;
@@ -1188,6 +1214,18 @@ export function createApiClient(config?: ApiClientConfig) {
     stopRest: (id: string) => post<unknown>(`/characters/${id}/rest/stop`),
     useItem: (id: string, itemInstanceId: string) =>
       post<unknown>(`/characters/${id}/items/${itemInstanceId}/use`),
+    getCharacterHousing: (id: string) => request<HousingView>(`/characters/${id}/housing`),
+    rentHousing: (id: string) => post<CharacterHousing>(`/characters/${id}/housing/rent`),
+    cancelHousing: (id: string) =>
+      post<{ ended: boolean; itemsReturned: number }>(`/characters/${id}/housing/cancel`),
+    storeHousingItem: (id: string, itemInstanceId: string) =>
+      post<{ stored: boolean; itemName: string }>(
+        `/characters/${id}/housing/items/${itemInstanceId}/store`,
+      ),
+    retrieveHousingItem: (id: string, itemInstanceId: string) =>
+      post<{ retrieved: boolean; itemName: string }>(
+        `/characters/${id}/housing/items/${itemInstanceId}/retrieve`,
+      ),
     equipItem: (id: string, itemInstanceId: string) =>
       post<unknown>(`/characters/${id}/items/${itemInstanceId}/equip`),
     unequipItem: (id: string, itemInstanceId: string) =>

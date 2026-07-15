@@ -74,6 +74,44 @@ export class CharactersController {
     return this.charactersService.stopRest(id, player.sub);
   }
 
+  @Get(':id/housing')
+  @ApiOperation({ summary: 'Current housing, stored items, and rent quote for this building' })
+  getHousing(@Param('id') id: string, @CurrentPlayer() player: AuthenticatedPlayer) {
+    return this.charactersService.getHousing(id, player.sub);
+  }
+
+  @Post(':id/housing/rent')
+  @ApiOperation({ summary: 'Rent the safehouse you are standing in' })
+  rentHousing(@Param('id') id: string, @CurrentPlayer() player: AuthenticatedPlayer) {
+    return this.charactersService.rentHousing(id, player.sub);
+  }
+
+  @Post(':id/housing/cancel')
+  @ApiOperation({ summary: 'End your lease (stored items are returned to you)' })
+  cancelHousing(@Param('id') id: string, @CurrentPlayer() player: AuthenticatedPlayer) {
+    return this.charactersService.cancelHousing(id, player.sub);
+  }
+
+  @Post(':id/housing/items/:itemInstanceId/store')
+  @ApiOperation({ summary: 'Store an inventory item in your safehouse (must be there)' })
+  storeItem(
+    @Param('id') id: string,
+    @Param('itemInstanceId') itemInstanceId: string,
+    @CurrentPlayer() player: AuthenticatedPlayer,
+  ) {
+    return this.charactersService.storeItemInHousing(id, player.sub, itemInstanceId);
+  }
+
+  @Post(':id/housing/items/:itemInstanceId/retrieve')
+  @ApiOperation({ summary: 'Retrieve a stored item from your safehouse (must be there)' })
+  retrieveItem(
+    @Param('id') id: string,
+    @Param('itemInstanceId') itemInstanceId: string,
+    @CurrentPlayer() player: AuthenticatedPlayer,
+  ) {
+    return this.charactersService.retrieveItemFromHousing(id, player.sub, itemInstanceId);
+  }
+
   @Post(':id/items/:itemInstanceId/equip')
   @ApiOperation({ summary: 'Equip a weapon, outfit, tool, or vehicle' })
   equipItem(

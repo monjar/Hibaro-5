@@ -6,7 +6,7 @@ import { useAuthGuard } from '@/lib/session-context';
 import { useCharacter } from '@/lib/use-character';
 import { Panel } from '@/components/Panel';
 import { describeItemFeatures, formatUiError } from '@/lib/ui-presenters';
-import type { InventoryItem } from '@heliora/platform-sdk';
+import type { HousingView, InventoryItem } from '@heliora/platform-sdk';
 
 const RARITY_COLORS: Record<string, string> = {
   COMMON: 'text-heliora-text',
@@ -31,6 +31,7 @@ export default function InventoryPage() {
   const session = useAuthGuard();
   const { character, refresh } = useCharacter();
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [housing, setHousing] = useState<HousingView | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -39,8 +40,12 @@ export default function InventoryPage() {
     if (!session.characterId) return;
     setLoading(true);
     try {
-      const data = await api.getCharacterInventory(session.characterId);
+      const [data, housingView] = await Promise.all([
+        api.getCharacterInventory(session.characterId),
+        api.getCharacterHousing(session.characterId).catch(() => null),
+      ]);
       setItems(data);
+      setHousing(housingView);
     } finally {
       setLoading(false);
     }
@@ -58,6 +63,22 @@ export default function InventoryPage() {
     try {
       await api.useItem(session.characterId, itemInstanceId);
       setMessage(`✅ Used ${name}`);
+      await Promise.all([reload(), refresh()]);
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setBusy(null);
+      setTimeout(() => setMessage(''), 3500);
+    }
+  }
+
+  async function storeItem(item: InventoryItem) {
+    if (!session.characterId) return;
+    setBusy(item.id);
+    setMessage('');
+    try {
+      await api.storeHousingItem(session.characterId, item.id);
+      setMessage(`✅ Stored ${item.itemDefinition.name} in your safehouse`);
       await Promise.all([reload(), refresh()]);
     } catch (e) {
       setMessage(`❌ ${formatUiError(e)}`);
@@ -191,6 +212,15 @@ export default function InventoryPage() {
                       }`}
                     >
                       {busy === item.id ? '…' : item.equippedSlot ? 'UNEQUIP' : 'EQUIP'}
+                    </button>
+                  )}
+                  {housing?.housing && housing.atHousingBuilding && !item.equippedSlot && (
+                    <button
+                      onClick={() => void storeItem(item)}
+                      disabled={busy === item.id}
+                      className="mt-2 w-full rounded border border-heliora-teal/50 bg-heliora-teal/10 px-3 py-1 text-xs font-mono font-bold text-heliora-teal hover:bg-heliora-teal/20 disabled:opacity-50"
+                    >
+                      {busy === item.id ? '…' : '🏠 STORE IN SAFEHOUSE'}
                     </button>
                   )}
                   {isQuest && (

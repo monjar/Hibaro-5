@@ -104,6 +104,13 @@ enum ItemOwnerType {
   FACTION
   CORPORATION
   BUILDING
+  HOUSING
+}
+
+enum CharacterHousingStatus {
+  ACTIVE
+  ENDED
+  EVICTED
 }
 
 enum EquipmentSlot {
@@ -210,6 +217,9 @@ enum ActivityType {
   DECISION_MADE
   DAILY_CLAIMED
   ACHIEVEMENT_EARNED
+  HOUSING_RENTED
+  HOUSING_ENDED
+  RENT_PAID
 }
 
 enum JobEmploymentStatus {
@@ -285,6 +295,7 @@ model Character {
   bountiesOnHead         PlayerBounty[]          @relation("BountyTarget")
   bountiesPosted         PlayerBounty[]          @relation("BountyPoster")
   bountiesClaimed        PlayerBounty[]          @relation("BountyClaimer")
+  housings               CharacterHousing[]
 }
 
 model SolarSystem {
@@ -346,8 +357,9 @@ model Building {
   gridZ         Float             @default(1.4)
 
   characters          Character[]
-  factionHeadquarters Faction[]     @relation("FactionHQ")
-  corporationHQs      Corporation[] @relation("CorporationHQ")
+  factionHeadquarters Faction[]          @relation("FactionHQ")
+  corporationHQs      Corporation[]      @relation("CorporationHQ")
+  housings            CharacterHousing[]
 }
 
 model Faction {
@@ -611,6 +623,23 @@ model StockPriceHistory {
   recordedAt    DateTime    @default(now())
 
   @@index([corporationId, recordedAt])
+}
+
+model CharacterHousing {
+  id            String                 @id @default(uuid())
+  characterId   String
+  character     Character              @relation(fields: [characterId], references: [id])
+  buildingId    String
+  building      Building               @relation(fields: [buildingId], references: [id])
+  rentPerDay    Float
+  nextRentDueAt DateTime
+  status        CharacterHousingStatus @default(ACTIVE)
+  totalRentPaid Float                  @default(0)
+  createdAt     DateTime               @default(now())
+  endedAt       DateTime?
+
+  @@index([characterId, status])
+  @@index([status, nextRentDueAt])
 }
 
 model DailyClaim {

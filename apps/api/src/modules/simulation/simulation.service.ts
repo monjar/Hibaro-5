@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, RelationshipType } from '@prisma/client';
 import { REALTIME_EVENT_CONTRACTS } from '@heliora/platform-sdk';
-import { computeNextStockPrice } from '@heliora/game-rules';
+import { computeNextStockPrice, evaluateRentCycle } from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpportunitiesService, REST_OPPORTUNITY_ID } from '../opportunities/opportunities.service';
 import { JobsService } from '../jobs/jobs.service';
@@ -29,6 +29,7 @@ export class SimulationService {
     const corporations = await this.advanceCorporations();
     const districtControl = await this.buildDistrictControlState();
     const energyDecay = await this.applyEnergyDecay(now);
+    const housingRent = await this.collectHousingRent(now);
     const npcActivity = await this.processNpcActivity(now);
     const jobShifts = await this.jobsService.processStrikes(now);
 
@@ -72,6 +73,15 @@ export class SimulationService {
         notes: [
           `${energyDecay.changed} character(s) decayed`,
           `${energyDecay.totalEnergyLost} total energy lost`,
+        ],
+      },
+      {
+        step: 'housing_rent' as const,
+        processed: housingRent.processed,
+        changes: housingRent.paid + housingRent.evicted,
+        notes: [
+          `${housingRent.paid} rent payment(s) collected (${housingRent.totalCollected} credits)`,
+          `${housingRent.evicted} eviction(s)`,
         ],
       },
       {
@@ -530,13 +540,23 @@ export class SimulationService {
       },
       select: { characterId: true },
     });
-    const restingCharacterIds = restingInstances.map((instance) => instance.characterId);
+    const housedCharacters = await this.prisma.characterHousing.findMany({
+      where: { status: 'ACTIVE' },
+      select: { characterId: true },
+    });
+    const exemptCharacterIds = [
+      ...new Set([
+        ...restingInstances.map((instance) => instance.characterId),
+        // A rented safehouse keeps you rested — no passive energy decay.
+        ...housedCharacters.map((housing) => housing.characterId),
+      ]),
+    ];
     const characters = await this.prisma.character.findMany({
       where: {
         type: 'PLAYER',
         energy: { gt: 0 },
         lastEnergyDecayAt: { lte: threshold },
-        ...(restingCharacterIds.length > 0 ? { id: { notIn: restingCharacterIds } } : {}),
+        ...(exemptCharacterIds.length > 0 ? { id: { notIn: exemptCharacterIds } } : {}),
       },
       select: { id: true, energy: true, maxEnergy: true, lastEnergyDecayAt: true },
     });
@@ -568,7 +588,124 @@ export class SimulationService {
       totalEnergyLost += energyLoss;
     }
 
+    // Keep the decay clock current for housed characters so ending a lease
+    // doesn't retroactively charge the whole housed period.
+    if (housedCharacters.length > 0) {
+      await this.prisma.character.updateMany({
+        where: {
+          id: { in: housedCharacters.map((housing) => housing.characterId) },
+          lastEnergyDecayAt: { lte: threshold },
+        },
+        data: { lastEnergyDecayAt: now },
+      });
+    }
+
     return { processed: characters.length, changed, totalEnergyLost };
+  }
+
+  private async collectHousingRent(now: Date) {
+    const dueHousings = await this.prisma.characterHousing.findMany({
+      where: { status: 'ACTIVE', nextRentDueAt: { lte: now } },
+      include: {
+        character: { select: { id: true, name: true, playerId: true, credits: true, wantedLevel: true } },
+        building: { select: { id: true, name: true } },
+      },
+    });
+
+    let paid = 0;
+    let evicted = 0;
+    let totalCollected = 0;
+
+    for (const housing of dueHousings) {
+      const cycle = evaluateRentCycle(
+        { nextRentDueAt: housing.nextRentDueAt, rentPerDay: housing.rentPerDay },
+        { credits: housing.character.credits, wantedLevel: housing.character.wantedLevel },
+        now,
+      );
+
+      const characterUpdates: Record<string, unknown> = {};
+      if (cycle.periodsPaid > 0) {
+        characterUpdates.credits = cycle.creditsAfter;
+        if (cycle.wantedReduction > 0) {
+          characterUpdates.wantedLevel = Math.max(
+            0,
+            housing.character.wantedLevel - cycle.wantedReduction,
+          );
+        }
+      }
+
+      if (cycle.evicted) {
+        await this.prisma.$transaction([
+          ...(Object.keys(characterUpdates).length > 0
+            ? [
+                this.prisma.character.update({
+                  where: { id: housing.character.id },
+                  data: characterUpdates as never,
+                }),
+              ]
+            : []),
+          // Landlord keeps nothing of yours: stored items go back to the tenant.
+          this.prisma.itemInstance.updateMany({
+            where: { ownerType: 'HOUSING', ownerId: housing.id },
+            data: { ownerType: 'CHARACTER', ownerId: housing.character.id },
+          }),
+          this.prisma.characterHousing.update({
+            where: { id: housing.id },
+            data: {
+              status: 'EVICTED',
+              endedAt: now,
+              nextRentDueAt: cycle.nextRentDueAt,
+              totalRentPaid: housing.totalRentPaid + cycle.totalRent,
+            },
+          }),
+          ...(housing.character.playerId
+            ? [
+                this.prisma.activityLog.create({
+                  data: {
+                    playerId: housing.character.playerId,
+                    characterId: housing.character.id,
+                    type: 'HOUSING_ENDED',
+                    message: `${housing.character.name} was evicted from ${housing.building.name} — rent unpaid`,
+                    relatedEntities: { housingId: housing.id, buildingId: housing.building.id },
+                  },
+                }),
+              ]
+            : []),
+        ]);
+        evicted += 1;
+      } else if (cycle.periodsPaid > 0) {
+        await this.prisma.$transaction([
+          this.prisma.character.update({
+            where: { id: housing.character.id },
+            data: characterUpdates as never,
+          }),
+          this.prisma.characterHousing.update({
+            where: { id: housing.id },
+            data: {
+              nextRentDueAt: cycle.nextRentDueAt,
+              totalRentPaid: housing.totalRentPaid + cycle.totalRent,
+            },
+          }),
+          ...(housing.character.playerId
+            ? [
+                this.prisma.activityLog.create({
+                  data: {
+                    playerId: housing.character.playerId,
+                    characterId: housing.character.id,
+                    type: 'RENT_PAID',
+                    message: `${housing.character.name} paid ${cycle.totalRent} rent for ${housing.building.name}${cycle.wantedReduction > 0 ? ' and laid low (wanted -' + cycle.wantedReduction + ')' : ''}`,
+                    relatedEntities: { housingId: housing.id, rent: cycle.totalRent },
+                  },
+                }),
+              ]
+            : []),
+        ]);
+        paid += 1;
+        totalCollected += cycle.totalRent;
+      }
+    }
+
+    return { processed: dueHousings.length, paid, evicted, totalCollected };
   }
 
   private async processNpcActivity(now: Date) {

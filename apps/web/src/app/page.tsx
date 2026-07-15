@@ -29,6 +29,7 @@ import { useRewardReferenceLookup } from '@/lib/use-reward-reference-lookup';
 import type {
   ActivityLog,
   DailyStatus,
+  HousingView,
   OpportunityDefinition,
   OpportunityInstance,
   WorldEvent,
@@ -92,6 +93,8 @@ export default function HomePage() {
   const [deciding, setDeciding] = useState<string | null>(null);
   const [daily, setDaily] = useState<DailyStatus | null>(null);
   const [claimingDaily, setClaimingDaily] = useState(false);
+  const [housing, setHousing] = useState<HousingView | null>(null);
+  const [housingBusy, setHousingBusy] = useState(false);
   const [worldFeed, setWorldFeed] = useState<
     Array<{ id: number; icon: string; text: string; at: number }>
   >([]);
@@ -101,18 +104,20 @@ export default function HomePage() {
   const refreshAll = useCallback(async () => {
     if (!session.characterId || !session.player?.id) return;
     try {
-      const [inst, act, events, available, dailyStatus] = await Promise.all([
+      const [inst, act, events, available, dailyStatus, housingView] = await Promise.all([
         api.getOpportunityInstances(session.characterId),
         api.getActivity(session.player.id, 1, 12),
         api.getActiveWorldEvents(),
         api.getAvailableOpportunities(session.characterId),
         api.getDailyStatus(session.player.id),
+        api.getCharacterHousing(session.characterId),
       ]);
       setInstances(inst);
       setActivity(act.logs);
       setWorldEvents(events);
       setAvailableQuests(available.filter((opportunity) => opportunity.kind === 'QUEST'));
       setDaily(dailyStatus);
+      setHousing(housingView);
       await refresh();
     } catch {
       // soft fail
@@ -189,6 +194,32 @@ export default function HomePage() {
     } finally {
       setResolving(null);
       setTimeout(() => setMessage(''), 5000);
+    }
+  }
+
+  async function housingAction(action: 'rent' | 'cancel' | 'retrieve', itemId?: string) {
+    if (!session.characterId) return;
+    setHousingBusy(true);
+    setMessage('');
+    try {
+      if (action === 'rent') {
+        await api.rentHousing(session.characterId);
+        setMessage('✅ Lease signed — this safehouse is yours. No more passive energy drain.');
+      } else if (action === 'cancel') {
+        const result = await api.cancelHousing(session.characterId);
+        setMessage(
+          `✅ Lease ended${result.itemsReturned > 0 ? ` — ${result.itemsReturned} stored item(s) returned to your pack` : ''}`,
+        );
+      } else if (action === 'retrieve' && itemId) {
+        const result = await api.retrieveHousingItem(session.characterId, itemId);
+        setMessage(`✅ Retrieved ${result.itemName} from storage`);
+      }
+      await refreshAll();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setHousingBusy(false);
+      setTimeout(() => setMessage(''), 6000);
     }
   }
 
@@ -540,6 +571,60 @@ export default function HomePage() {
               )}
             />
           </div>
+          {housing?.housing ? (
+            <div className="mt-3 rounded border border-heliora-teal/40 bg-heliora-teal/5 p-2 text-xs">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="font-mono font-bold text-heliora-teal">
+                  🏠 {housing.housing.building?.name ?? 'Your safehouse'}
+                </span>
+                <button
+                  onClick={() => void housingAction('cancel')}
+                  disabled={housingBusy}
+                  className="rounded border border-heliora-border px-2 py-0.5 text-[10px] font-mono text-heliora-text-dim hover:text-heliora-red disabled:opacity-40"
+                >
+                  END LEASE
+                </button>
+              </div>
+              <p className="text-heliora-text-dim">
+                ${housing.housing.rentPerDay}/day · next rent{' '}
+                {formatTimeLeft(housing.housing.nextRentDueAt)} · no passive energy drain while
+                housed · rent day shaves wanted level
+              </p>
+              {housing.storedItems.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-[10px] uppercase tracking-wider text-heliora-text-dim">
+                    Storage ({housing.storedItems.length})
+                  </p>
+                  {housing.storedItems.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between">
+                      <span className="text-heliora-text">{item.itemDefinition.name}</span>
+                      {housing.atHousingBuilding ? (
+                        <button
+                          onClick={() => void housingAction('retrieve', item.id)}
+                          disabled={housingBusy}
+                          className="rounded border border-heliora-teal/50 px-2 py-0.5 text-[10px] font-mono text-heliora-teal hover:bg-heliora-teal/10 disabled:opacity-40"
+                        >
+                          RETRIEVE
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-heliora-text-dim">at safehouse</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : housing?.canRentHere && housing.rentQuote ? (
+            <button
+              onClick={() => void housingAction('rent')}
+              disabled={housingBusy}
+              className="mt-3 w-full rounded border border-heliora-teal/50 bg-heliora-teal/10 px-3 py-1.5 text-xs font-mono font-bold text-heliora-teal hover:bg-heliora-teal/20 disabled:opacity-40"
+            >
+              {housingBusy
+                ? '…'
+                : `🏠 RENT THIS SAFEHOUSE — $${housing.rentQuote.rentPerDay}/day`}
+            </button>
+          ) : null}
         </Panel>
       </div>
 
