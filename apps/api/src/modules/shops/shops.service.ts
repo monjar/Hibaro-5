@@ -198,6 +198,11 @@ export class ShopsService {
     if (item.itemDefinition.category === 'QUEST_ITEM') {
       throw new BadRequestException('Quest items cannot be sold');
     }
+    if (item.equippedSlot) {
+      throw new BadRequestException(
+        `${item.itemDefinition.name} is equipped — unequip it before selling`,
+      );
+    }
 
     const baseSellPrice = Math.max(
       1,

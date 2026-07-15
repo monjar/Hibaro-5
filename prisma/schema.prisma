@@ -106,6 +106,13 @@ enum ItemOwnerType {
   BUILDING
 }
 
+enum EquipmentSlot {
+  WEAPON
+  OUTFIT
+  TOOL
+  VEHICLE
+}
+
 enum OpportunityKind {
   GIG
   JOB
@@ -434,7 +441,10 @@ model ItemInstance {
   condition        Int            @default(100)
   customName       String?
   modifiers        Json?
+  equippedSlot     EquipmentSlot?
   createdAt        DateTime       @default(now())
+
+  @@index([ownerType, ownerId, equippedSlot])
 }
 
 model OpportunityDefinition {

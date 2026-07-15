@@ -29,9 +29,16 @@ function makePrismaMock() {
     opportunityInstance: {
       findFirst: jest.fn(),
     },
+    itemInstance: {
+      findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
     activityLog: {
       create: jest.fn(),
     },
+    $transaction: jest.fn((ops: unknown[]) => Promise.all(ops as Promise<unknown>[])),
   };
 }
 
@@ -199,5 +206,99 @@ describe('CharactersService.allocateStatPoints', () => {
     await expect(
       service.allocateStatPoints('char-1', 'player-1', { engineering: 2 }),
     ).rejects.toThrow(/capped at 20/);
+  });
+});
+
+describe('CharactersService equip/unequip', () => {
+  let prisma: ReturnType<typeof makePrismaMock>;
+  let opportunities: ReturnType<typeof makeOpportunitiesMock>;
+  let service: CharactersService;
+
+  const toolItem = {
+    id: 'item-1',
+    ownerType: 'CHARACTER',
+    ownerId: 'char-1',
+    condition: 100,
+    equippedSlot: null,
+    itemDefinition: {
+      id: 'def-1',
+      name: 'Cheap Hacking Deck',
+      category: 'TOOL',
+      rarity: 'COMMON',
+      toolData: { statBonuses: { hacking: 2 } },
+    },
+  };
+
+  beforeEach(() => {
+    prisma = makePrismaMock();
+    opportunities = makeOpportunitiesMock();
+    service = new CharactersService(prisma as never, opportunities as never);
+    prisma.character.findUnique.mockResolvedValue(baseCharacter);
+  });
+
+  it('equips a tool into the TOOL slot and clears the previous occupant', async () => {
+    prisma.itemInstance.findUnique.mockResolvedValue(toolItem);
+    prisma.itemInstance.findMany.mockResolvedValue([
+      { ...toolItem, equippedSlot: 'TOOL' },
+    ]);
+
+    const view = await service.equipItem('char-1', 'player-1', 'item-1');
+
+    expect(prisma.itemInstance.updateMany).toHaveBeenCalledWith({
+      where: { ownerType: 'CHARACTER', ownerId: 'char-1', equippedSlot: 'TOOL' },
+      data: { equippedSlot: null },
+    });
+    expect(prisma.itemInstance.update).toHaveBeenCalledWith({
+      where: { id: 'item-1' },
+      data: { equippedSlot: 'TOOL' },
+    });
+    expect(view.bonuses).toEqual({ hacking: 2 });
+  });
+
+  it('rejects equipping non-equippable categories', async () => {
+    prisma.itemInstance.findUnique.mockResolvedValue({
+      ...toolItem,
+      itemDefinition: { ...toolItem.itemDefinition, category: 'CONSUMABLE' },
+    });
+    await expect(service.equipItem('char-1', 'player-1', 'item-1')).rejects.toThrow(
+      /cannot be equipped/,
+    );
+  });
+
+  it('rejects equipping broken or already-equipped items', async () => {
+    prisma.itemInstance.findUnique.mockResolvedValue({ ...toolItem, equippedSlot: 'TOOL' });
+    await expect(service.equipItem('char-1', 'player-1', 'item-1')).rejects.toThrow(
+      /already equipped/,
+    );
+
+    prisma.itemInstance.findUnique.mockResolvedValue({ ...toolItem, condition: 0 });
+    await expect(service.equipItem('char-1', 'player-1', 'item-1')).rejects.toThrow(/broken/);
+  });
+
+  it('rejects equipping items you do not own', async () => {
+    prisma.itemInstance.findUnique.mockResolvedValue({ ...toolItem, ownerId: 'someone-else' });
+    await expect(service.equipItem('char-1', 'player-1', 'item-1')).rejects.toThrow(
+      /not found in your inventory/,
+    );
+  });
+
+  it('unequips an equipped item', async () => {
+    prisma.itemInstance.findUnique.mockResolvedValue({ ...toolItem, equippedSlot: 'TOOL' });
+    prisma.itemInstance.findMany.mockResolvedValue([]);
+
+    const view = await service.unequipItem('char-1', 'player-1', 'item-1');
+
+    expect(prisma.itemInstance.update).toHaveBeenCalledWith({
+      where: { id: 'item-1' },
+      data: { equippedSlot: null },
+    });
+    expect(view.items).toEqual([]);
+  });
+
+  it('rejects unequipping an item that is not equipped', async () => {
+    prisma.itemInstance.findUnique.mockResolvedValue(toolItem);
+    await expect(service.unequipItem('char-1', 'player-1', 'item-1')).rejects.toThrow(
+      /not equipped/,
+    );
   });
 });

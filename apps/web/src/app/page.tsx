@@ -355,9 +355,20 @@ export default function HomePage() {
               )}
             </div>
           )}
+          {character.equipment && Object.keys(character.equipment.bonuses).length > 0 && (
+            <div className="mt-3 rounded border border-heliora-cyan/30 bg-heliora-cyan/5 p-2 text-xs font-mono">
+              <span className="text-heliora-text-dim">⚔ Gear: </span>
+              {Object.entries(character.equipment.bonuses).map(([stat, bonus], index) => (
+                <span key={stat} className="text-heliora-cyan">
+                  {index > 0 && ' · '}
+                  {stat.slice(0, 3).toUpperCase()} +{bonus}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="mt-3 text-xs text-heliora-text-dim border-t border-heliora-border pt-2">
             Earn XP from every gig, job, and quest. Level-ups grant stat points, plus stat XP still
-            grows from matching work (≈50% chance per success).
+            grows from matching work (≈50% chance per success). Equipped gear boosts your checks.
           </div>
         </Panel>
 

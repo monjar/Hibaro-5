@@ -279,7 +279,11 @@ describe('OpportunitiesService.acceptOpportunity', () => {
     ).rejects.toThrow(/Smuggler Toolkit/);
 
     prisma.itemInstance.findMany.mockResolvedValue([
-      { id: 'inst-item-1', itemDefinitionId: 'item-def-toolkit' },
+      {
+        id: 'inst-item-1',
+        itemDefinitionId: 'item-def-toolkit',
+        itemDefinition: { id: 'item-def-toolkit', name: 'Smuggler Toolkit', category: 'TOOL' },
+      },
     ]);
     prisma.opportunityInstance.create.mockResolvedValue({ id: 'inst-2', status: 'IN_PROGRESS' });
     const result = await service.acceptOpportunity('opp-1', 'char-1', 'player-1');

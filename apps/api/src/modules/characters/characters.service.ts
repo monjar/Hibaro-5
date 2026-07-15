@@ -5,7 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { STAT_CAP, xpThresholdForLevel, xpToNextLevel, MAX_LEVEL } from '@heliora/game-rules';
+import {
+  MAX_LEVEL,
+  STAT_CAP,
+  aggregateEquipmentBonuses,
+  slotForCategory,
+  xpThresholdForLevel,
+  xpToNextLevel,
+} from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { assessTravel } from './travel.utils';
 import { OpportunitiesService, REST_OPPORTUNITY_ID } from '../opportunities/opportunities.service';
@@ -166,9 +173,10 @@ export class CharactersService {
     }
 
     const progression = this.buildProgressionView(character.xp, character.level);
+    const equipment = await this.buildEquipmentView(character.id);
 
     if (!character.player) {
-      return { ...character, progression };
+      return { ...character, progression, equipment };
     }
 
     const safePlayer: Partial<typeof character.player> = { ...character.player };
@@ -176,8 +184,92 @@ export class CharactersService {
     return {
       ...character,
       progression,
+      equipment,
       player: safePlayer as Omit<typeof character.player, 'passwordHash'>,
     };
+  }
+
+  private async buildEquipmentView(characterId: string) {
+    const equipped = await this.prisma.itemInstance.findMany({
+      where: { ownerType: 'CHARACTER', ownerId: characterId, equippedSlot: { not: null } },
+      include: { itemDefinition: true },
+    });
+    return {
+      items: equipped.map((item) => ({
+        itemInstanceId: item.id,
+        slot: item.equippedSlot,
+        name: item.itemDefinition.name,
+        category: item.itemDefinition.category,
+        rarity: item.itemDefinition.rarity,
+      })),
+      bonuses: aggregateEquipmentBonuses(equipped.map((item) => item.itemDefinition)),
+    };
+  }
+
+  async equipItem(id: string, playerId: string, itemInstanceId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only equip items on your own character');
+    }
+
+    const item = await this.prisma.itemInstance.findUnique({
+      where: { id: itemInstanceId },
+      include: { itemDefinition: true },
+    });
+    if (!item || item.ownerType !== 'CHARACTER' || item.ownerId !== id) {
+      throw new NotFoundException('Item not found in your inventory');
+    }
+
+    const slot = slotForCategory(item.itemDefinition.category);
+    if (!slot) {
+      throw new BadRequestException(
+        `${item.itemDefinition.name} cannot be equipped (category ${item.itemDefinition.category})`,
+      );
+    }
+    if (item.equippedSlot) {
+      throw new BadRequestException(`${item.itemDefinition.name} is already equipped`);
+    }
+    if (item.condition <= 0) {
+      throw new BadRequestException(`${item.itemDefinition.name} is broken — repair it first`);
+    }
+
+    await this.prisma.$transaction([
+      // swap out whatever occupies the slot
+      this.prisma.itemInstance.updateMany({
+        where: { ownerType: 'CHARACTER', ownerId: id, equippedSlot: slot },
+        data: { equippedSlot: null },
+      }),
+      this.prisma.itemInstance.update({
+        where: { id: itemInstanceId },
+        data: { equippedSlot: slot },
+      }),
+    ]);
+
+    return this.buildEquipmentView(id);
+  }
+
+  async unequipItem(id: string, playerId: string, itemInstanceId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only unequip items on your own character');
+    }
+
+    const item = await this.prisma.itemInstance.findUnique({ where: { id: itemInstanceId } });
+    if (!item || item.ownerType !== 'CHARACTER' || item.ownerId !== id) {
+      throw new NotFoundException('Item not found in your inventory');
+    }
+    if (!item.equippedSlot) {
+      throw new BadRequestException('Item is not equipped');
+    }
+
+    await this.prisma.itemInstance.update({
+      where: { id: itemInstanceId },
+      data: { equippedSlot: null },
+    });
+
+    return this.buildEquipmentView(id);
   }
 
   private buildProgressionView(xp: number, level: number) {

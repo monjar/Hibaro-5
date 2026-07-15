@@ -562,7 +562,9 @@ async function main() {
   // ==================== ITEM DEFINITIONS ====================
   const rustyPulsePistol = await prisma.itemDefinition.upsert({
     where: { name: 'Rusty Pulse Pistol' },
-    update: {},
+    update: {
+      weaponData: { damage: 8, range: 'SHORT', ammoType: 'PULSE_CELL', statBonuses: { combat: 1 } },
+    },
     create: {
       name: 'Rusty Pulse Pistol',
       description: 'A battered pulse pistol that still fires. Barely.',
@@ -570,13 +572,15 @@ async function main() {
       rarity: 'COMMON',
       baseValue: 45,
       weight: 1.2,
-      weaponData: { damage: 8, range: 'SHORT', ammoType: 'PULSE_CELL' },
+      weaponData: { damage: 8, range: 'SHORT', ammoType: 'PULSE_CELL', statBonuses: { combat: 1 } },
     },
   });
 
   const workerJacket = await prisma.itemDefinition.upsert({
     where: { name: 'Worker Jacket' },
-    update: {},
+    update: {
+      clothingData: { armor: 2, slot: 'TORSO', statBonuses: { strength: 1 } },
+    },
     create: {
       name: 'Worker Jacket',
       description: 'Standard issue industrial jacket. Offers minor protection.',
@@ -584,13 +588,15 @@ async function main() {
       rarity: 'COMMON',
       baseValue: 25,
       weight: 1.5,
-      clothingData: { armor: 2, slot: 'TORSO' },
+      clothingData: { armor: 2, slot: 'TORSO', statBonuses: { strength: 1 } },
     },
   });
 
   const cheapHackingDeck = await prisma.itemDefinition.upsert({
     where: { name: 'Cheap Hacking Deck' },
-    update: {},
+    update: {
+      toolData: { tier: 1, statBonuses: { hacking: 2 } },
+    },
     create: {
       name: 'Cheap Hacking Deck',
       description: 'A basic hacking interface. Clunky but functional.',
@@ -598,7 +604,7 @@ async function main() {
       rarity: 'COMMON',
       baseValue: 80,
       weight: 0.5,
-      toolData: { hackingBonus: 2, tier: 1 },
+      toolData: { tier: 1, statBonuses: { hacking: 2 } },
     },
   });
 
@@ -632,7 +638,9 @@ async function main() {
 
   const smugglerToolkit = await prisma.itemDefinition.upsert({
     where: { name: 'Smuggler Toolkit' },
-    update: {},
+    update: {
+      toolData: { concealmentCapacity: 5, statBonuses: { stealth: 3 } },
+    },
     create: {
       name: 'Smuggler Toolkit',
       description: 'A set of tools for concealing cargo and bypassing customs scans.',
@@ -640,7 +648,7 @@ async function main() {
       rarity: 'UNCOMMON',
       baseValue: 150,
       weight: 2.0,
-      toolData: { stealthBonus: 3, concealmentCapacity: 5 },
+      toolData: { concealmentCapacity: 5, statBonuses: { stealth: 3 } },
     },
   });
 

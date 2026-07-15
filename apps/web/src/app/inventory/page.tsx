@@ -67,6 +67,27 @@ export default function InventoryPage() {
     }
   }
 
+  async function toggleEquip(item: InventoryItem) {
+    if (!session.characterId) return;
+    setBusy(item.id);
+    setMessage('');
+    try {
+      if (item.equippedSlot) {
+        await api.unequipItem(session.characterId, item.id);
+        setMessage(`✅ Unequipped ${item.itemDefinition.name}`);
+      } else {
+        await api.equipItem(session.characterId, item.id);
+        setMessage(`✅ Equipped ${item.itemDefinition.name}`);
+      }
+      await Promise.all([reload(), refresh()]);
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setBusy(null);
+      setTimeout(() => setMessage(''), 3500);
+    }
+  }
+
   if (!session.ready || !session.token) return null;
 
   return (
@@ -97,11 +118,16 @@ export default function InventoryPage() {
             {items.map((item) => {
               const isConsumable = item.itemDefinition.category === 'CONSUMABLE';
               const isQuest = item.itemDefinition.category === 'QUEST_ITEM';
+              const isEquippable = ['WEAPON', 'CLOTHING', 'TOOL', 'VEHICLE'].includes(
+                item.itemDefinition.category,
+              );
               const featureLines = describeItemFeatures(item.itemDefinition);
               return (
                 <div
                   key={item.id}
-                  className="border border-heliora-border rounded p-3 bg-heliora-dark"
+                  className={`border rounded p-3 bg-heliora-dark ${
+                    item.equippedSlot ? 'border-heliora-cyan/60' : 'border-heliora-border'
+                  }`}
                 >
                   <div className="flex items-start justify-between mb-1">
                     <div>
@@ -117,7 +143,14 @@ export default function InventoryPage() {
                         {item.itemDefinition.category} ∷ {item.itemDefinition.rarity}
                       </p>
                     </div>
-                    <span className="text-xs text-heliora-text-dim">{item.condition}%</span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-xs text-heliora-text-dim">{item.condition}%</span>
+                      {item.equippedSlot && (
+                        <span className="rounded border border-heliora-cyan/50 bg-heliora-cyan/10 px-1 text-[10px] font-mono font-bold text-heliora-cyan">
+                          EQUIPPED
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {item.itemDefinition.description && (
                     <p className="text-heliora-text-dim text-xs mb-2">
@@ -145,6 +178,19 @@ export default function InventoryPage() {
                       className="mt-3 w-full px-3 py-1 bg-heliora-green/20 border border-heliora-green/50 rounded text-heliora-green text-xs font-mono font-bold hover:bg-heliora-green/30 disabled:opacity-50"
                     >
                       {busy === item.id ? 'USING…' : 'USE'}
+                    </button>
+                  )}
+                  {isEquippable && (
+                    <button
+                      onClick={() => void toggleEquip(item)}
+                      disabled={busy === item.id}
+                      className={`mt-3 w-full px-3 py-1 rounded text-xs font-mono font-bold disabled:opacity-50 ${
+                        item.equippedSlot
+                          ? 'bg-heliora-dark border border-heliora-border text-heliora-text-dim hover:text-heliora-text'
+                          : 'bg-heliora-cyan/20 border border-heliora-cyan/50 text-heliora-cyan hover:bg-heliora-cyan/30'
+                      }`}
+                    >
+                      {busy === item.id ? '…' : item.equippedSlot ? 'UNEQUIP' : 'EQUIP'}
                     </button>
                   )}
                   {isQuest && (

@@ -74,6 +74,26 @@ export class CharactersController {
     return this.charactersService.stopRest(id, player.sub);
   }
 
+  @Post(':id/items/:itemInstanceId/equip')
+  @ApiOperation({ summary: 'Equip a weapon, outfit, tool, or vehicle' })
+  equipItem(
+    @Param('id') id: string,
+    @Param('itemInstanceId') itemInstanceId: string,
+    @CurrentPlayer() player: AuthenticatedPlayer,
+  ) {
+    return this.charactersService.equipItem(id, player.sub, itemInstanceId);
+  }
+
+  @Post(':id/items/:itemInstanceId/unequip')
+  @ApiOperation({ summary: 'Unequip an equipped item' })
+  unequipItem(
+    @Param('id') id: string,
+    @Param('itemInstanceId') itemInstanceId: string,
+    @CurrentPlayer() player: AuthenticatedPlayer,
+  ) {
+    return this.charactersService.unequipItem(id, player.sub, itemInstanceId);
+  }
+
   @Post(':id/stats/allocate')
   @ApiOperation({ summary: 'Spend unspent stat points earned from level-ups' })
   allocateStatPoints(

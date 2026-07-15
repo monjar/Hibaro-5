@@ -12,6 +12,8 @@ import {
   Reward as GameRulesReward,
   Risk as GameRulesRisk,
   STAT_CAP,
+  aggregateEquipmentBonuses,
+  applyEquipmentBonuses,
   applyXpGain,
   calculateOpportunityEnergyCost,
   calculateOpportunitySuccessChance,
@@ -292,7 +294,7 @@ export class OpportunitiesService {
     const requirementContext = await this.buildRequirementContext(characterId);
     const completedQuestIds = new Set(requirementContext.completedQuestIds ?? []);
     const unlockSources = this.buildQuestUnlockSources(all);
-    const characterStats = this.toCharacterStats(character);
+    const characterStats = await this.getEffectiveStats(character);
 
     return all
       .filter((opp) => {
@@ -397,12 +399,9 @@ export class OpportunitiesService {
       throw new BadRequestException('Quest is locked until you complete its prerequisite chain');
     }
 
+    const effectiveStats = await this.getEffectiveStats(character);
     const requirements = this.readRequirements(definition.requirements);
-    const requirementResult = checkRequirements(
-      this.toCharacterStats(character),
-      requirements,
-      requirementContext,
-    );
+    const requirementResult = checkRequirements(effectiveStats, requirements, requirementContext);
     if (!requirementResult.passed) {
       throw new BadRequestException(
         this.describeFailedRequirement(
@@ -424,7 +423,7 @@ export class OpportunitiesService {
     const completesAt = definition.durationMinutes
       ? new Date(now.getTime() + definition.durationMinutes * 60 * 1000)
       : new Date(now.getTime() + 60 * 60 * 1000);
-    const plannedOutcome = this.planOutcome(character, definition);
+    const plannedOutcome = this.planOutcome(effectiveStats, definition);
 
     await this.prisma.character.update({
       where: { id: characterId },
@@ -493,7 +492,7 @@ export class OpportunitiesService {
       delta: number;
     }> = [];
 
-    const rulesCharacter = this.toCharacterStats(character);
+    const rulesCharacter = await this.getEffectiveStats(character);
     const rulesDefinition = this.toGameRulesOpportunity(definition);
     const plannedOutcome = this.readPlannedOutcome(instance.progress);
     const successChance =
@@ -1164,8 +1163,7 @@ export class OpportunitiesService {
     return Number(value.toFixed(2));
   }
 
-  private planOutcome(character: any, definition: any): PlannedOutcome {
-    const rulesCharacter = this.toCharacterStats(character);
+  private planOutcome(rulesCharacter: CharacterStats, definition: any): PlannedOutcome {
     const rulesDefinition = this.toGameRulesOpportunity(definition);
     const successChance = calculateOpportunitySuccessChance(rulesCharacter, rulesDefinition);
     const check = rollOpportunityCheck(rulesCharacter, rulesDefinition);
@@ -1325,6 +1323,25 @@ export class OpportunitiesService {
     if (definition.kind !== 'QUEST') return false;
     const questData = this.readQuestData(definition.questData);
     return Boolean(questData?.isOneOff && completedQuestIds.has(definition.id));
+  }
+
+  /**
+   * Base stats plus bonuses from equipped gear — the numbers every
+   * requirement check and d20 roll should use.
+   */
+  private async getEffectiveStats(character: Record<string, unknown>): Promise<CharacterStats> {
+    const equipped = await this.prisma.itemInstance.findMany({
+      where: {
+        ownerType: 'CHARACTER',
+        ownerId: String(character.id),
+        equippedSlot: { not: null },
+      },
+      include: { itemDefinition: true },
+    });
+    const bonuses = aggregateEquipmentBonuses(
+      equipped.map((item: any) => item.itemDefinition).filter(Boolean),
+    );
+    return applyEquipmentBonuses(this.toCharacterStats(character), bonuses);
   }
 
   private toCharacterStats(character: Record<string, unknown>): CharacterStats {

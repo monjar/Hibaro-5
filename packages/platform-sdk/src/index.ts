@@ -61,6 +61,16 @@ export interface Character {
     nextLevelAt: number | null;
     atMaxLevel: boolean;
   };
+  equipment?: {
+    items: Array<{
+      itemInstanceId: string;
+      slot: EquipmentSlot;
+      name: string;
+      category: string;
+      rarity: string;
+    }>;
+    bonuses: Record<string, number>;
+  };
   playerId?: string;
   currentPlanet?: { id: string; name: string; planetType: string };
   currentDistrict?: { id: string; name: string; dangerLevel: number };
@@ -550,6 +560,8 @@ export interface ShopListing {
   stock: ShopItem[];
 }
 
+export type EquipmentSlot = 'WEAPON' | 'OUTFIT' | 'TOOL' | 'VEHICLE';
+
 export interface InventoryItem {
   id: string;
   itemDefinitionId: string;
@@ -558,6 +570,7 @@ export interface InventoryItem {
   condition: number;
   customName?: string | null;
   modifiers?: unknown;
+  equippedSlot?: EquipmentSlot | null;
   itemDefinition: {
     id: string;
     name: string;
@@ -1030,6 +1043,10 @@ export function createApiClient(config?: ApiClientConfig) {
     stopRest: (id: string) => post<unknown>(`/characters/${id}/rest/stop`),
     useItem: (id: string, itemInstanceId: string) =>
       post<unknown>(`/characters/${id}/items/${itemInstanceId}/use`),
+    equipItem: (id: string, itemInstanceId: string) =>
+      post<unknown>(`/characters/${id}/items/${itemInstanceId}/equip`),
+    unequipItem: (id: string, itemInstanceId: string) =>
+      post<unknown>(`/characters/${id}/items/${itemInstanceId}/unequip`),
     getActivity: (playerId: string, page = 1, limit = 30) =>
       request<{ logs: ActivityLog[]; total: number; page: number; limit: number }>(
         `/players/${playerId}/activity?page=${page}&limit=${limit}`,
