@@ -208,6 +208,8 @@ enum ActivityType {
   LEVEL_UP
   STAT_TRAINED
   DECISION_MADE
+  DAILY_CLAIMED
+  ACHIEVEMENT_EARNED
 }
 
 enum JobEmploymentStatus {
@@ -233,8 +235,10 @@ model Player {
   createdAt    DateTime @default(now())
   lastLoginAt  DateTime @default(now())
 
-  character    Character?
-  activityLogs ActivityLog[]
+  character          Character?
+  activityLogs       ActivityLog[]
+  dailyClaims        DailyClaim[]
+  achievementRecords AchievementRecord[]
 }
 
 model Character {
@@ -607,6 +611,30 @@ model StockPriceHistory {
   recordedAt    DateTime    @default(now())
 
   @@index([corporationId, recordedAt])
+}
+
+model DailyClaim {
+  id             String   @id @default(uuid())
+  playerId       String
+  player         Player   @relation(fields: [playerId], references: [id])
+  streak         Int      @default(1)
+  creditsAwarded Float    @default(0)
+  xpAwarded      Int      @default(0)
+  claimedAt      DateTime @default(now())
+
+  @@index([playerId, claimedAt])
+}
+
+model AchievementRecord {
+  id             String   @id @default(uuid())
+  playerId       String
+  player         Player   @relation(fields: [playerId], references: [id])
+  achievementId  String
+  creditsAwarded Float    @default(0)
+  xpAwarded      Int      @default(0)
+  claimedAt      DateTime @default(now())
+
+  @@unique([playerId, achievementId])
 }
 
 model SimulationTick {

@@ -13,3 +13,4 @@ export * from './progression';
 export * from './equipment';
 export * from './decisions';
 export * from './pvp';
+export * from './retention';

@@ -840,6 +840,40 @@ export const REALTIME_EVENT_CONTRACTS: RealtimeEventContract[] = [
   },
 ];
 
+export interface DailyStatus {
+  canClaim: boolean;
+  currentStreak: number;
+  nextStreak: number;
+  nextReward: { credits: number; xp: number };
+  lastClaimAt: string | null;
+}
+
+export interface DailyClaimResult {
+  claim: { id: string; streak: number; creditsAwarded: number; xpAwarded: number };
+  reward: { credits: number; xp: number };
+  streak: number;
+  levelUp: { level: number; statPointsGained: number } | null;
+}
+
+export interface AchievementView {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  target: number;
+  progress: number;
+  unlocked: boolean;
+  claimed: boolean;
+  rewardCredits: number;
+  rewardXp: number;
+}
+
+export interface AchievementClaimResult {
+  record: { id: string; achievementId: string };
+  reward: { credits: number; xp: number };
+  levelUp: { level: number; statPointsGained: number } | null;
+}
+
 export interface NearbyPlayer {
   id: string;
   name: string;
@@ -1185,6 +1219,13 @@ export function createApiClient(config?: ApiClientConfig) {
       post<unknown>(`/shops/${buildingId}/buy`, { itemInstanceId, characterId }),
     shopSell: (buildingId: string, itemInstanceId: string, characterId: string) =>
       post<unknown>(`/shops/${buildingId}/sell`, { itemInstanceId, characterId }),
+    // retention
+    getDailyStatus: (playerId: string) => request<DailyStatus>(`/players/${playerId}/daily`),
+    claimDaily: (playerId: string) => post<DailyClaimResult>(`/players/${playerId}/daily/claim`),
+    getAchievements: (playerId: string) =>
+      request<AchievementView[]>(`/players/${playerId}/achievements`),
+    claimAchievement: (playerId: string, achievementId: string) =>
+      post<AchievementClaimResult>(`/players/${playerId}/achievements/${achievementId}/claim`),
     // pvp
     getLeaderboard: () => request<LeaderboardRow[]>('/pvp/leaderboard'),
     getNearbyPlayers: (characterId: string) =>

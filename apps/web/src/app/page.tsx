@@ -28,6 +28,7 @@ import {
 import { useRewardReferenceLookup } from '@/lib/use-reward-reference-lookup';
 import type {
   ActivityLog,
+  DailyStatus,
   OpportunityDefinition,
   OpportunityInstance,
   WorldEvent,
@@ -71,6 +72,10 @@ const ACTIVITY_ICONS: Record<string, string> = {
   BUILDING_ENTERED: '🏚️',
   LEVEL_UP: '⬆️',
   STAT_TRAINED: '🏋️',
+  DECISION_MADE: '🎲',
+  COMBAT_EVENT: '⚔️',
+  DAILY_CLAIMED: '📦',
+  ACHIEVEMENT_EARNED: '🏆',
 };
 
 export default function HomePage() {
@@ -85,22 +90,26 @@ export default function HomePage() {
   const [pendingAlloc, setPendingAlloc] = useState<Record<string, number>>({});
   const [training, setTraining] = useState(false);
   const [deciding, setDeciding] = useState<string | null>(null);
+  const [daily, setDaily] = useState<DailyStatus | null>(null);
+  const [claimingDaily, setClaimingDaily] = useState(false);
   const now = useNow();
   const rewardReferenceLookup = useRewardReferenceLookup();
 
   const refreshAll = useCallback(async () => {
     if (!session.characterId || !session.player?.id) return;
     try {
-      const [inst, act, events, available] = await Promise.all([
+      const [inst, act, events, available, dailyStatus] = await Promise.all([
         api.getOpportunityInstances(session.characterId),
         api.getActivity(session.player.id, 1, 12),
         api.getActiveWorldEvents(),
         api.getAvailableOpportunities(session.characterId),
+        api.getDailyStatus(session.player.id),
       ]);
       setInstances(inst);
       setActivity(act.logs);
       setWorldEvents(events);
       setAvailableQuests(available.filter((opportunity) => opportunity.kind === 'QUEST'));
+      setDaily(dailyStatus);
       await refresh();
     } catch {
       // soft fail
@@ -150,6 +159,27 @@ export default function HomePage() {
     } finally {
       setResolving(null);
       setTimeout(() => setMessage(''), 5000);
+    }
+  }
+
+  async function claimDaily() {
+    if (!session.player?.id) return;
+    setClaimingDaily(true);
+    setMessage('');
+    try {
+      const result = await api.claimDaily(session.player.id);
+      const levelNote = result.levelUp
+        ? ` · ⬆ LEVEL UP! Now level ${result.levelUp.level}`
+        : '';
+      setMessage(
+        `✅ Supply drop claimed: +$${result.reward.credits}, +${result.reward.xp} XP (streak ${result.streak})${levelNote}`,
+      );
+      await refreshAll();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setClaimingDaily(false);
+      setTimeout(() => setMessage(''), 7000);
     }
   }
 
@@ -252,6 +282,28 @@ export default function HomePage() {
         >
           {message}
         </div>
+      )}
+
+      {daily?.canClaim && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-heliora-green/50 bg-heliora-green/10 p-3">
+          <div className="text-sm font-mono text-heliora-green">
+            📦 Daily supply drop ready — +${daily.nextReward.credits} and +{daily.nextReward.xp} XP
+            {daily.nextStreak > 1 ? ` (streak ${daily.nextStreak})` : ''}
+          </div>
+          <button
+            onClick={() => void claimDaily()}
+            disabled={claimingDaily}
+            className="rounded border border-heliora-green/60 bg-heliora-green/20 px-4 py-1.5 text-xs font-mono font-bold text-heliora-green hover:bg-heliora-green/30 disabled:opacity-50"
+          >
+            {claimingDaily ? 'CLAIMING…' : 'CLAIM'}
+          </button>
+        </div>
+      )}
+      {daily && !daily.canClaim && daily.currentStreak > 0 && (
+        <p className="text-[11px] font-mono text-heliora-text-dim">
+          📦 Daily supply drop claimed · streak {daily.currentStreak} · come back tomorrow (48h
+          grace before the streak resets)
+        </p>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
