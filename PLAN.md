@@ -26,16 +26,6 @@ A full audit of the codebase (game-rules, simulation, API, web app) against "rea
 
 ## Up Next (publishing roadmap, in order)
 
-### 1. Fix broken core mechanics ⚙️
-Make the systems the content relies on actually work.
-
-- Populate requirement context so `ITEM_REQUIRED` works (inventory item-definition ids).
-- Implement the dropped failure consequences in the live resolver: `MODIFY_CREDITS`, `MODIFY_FACTION_REPUTATION`, `MODIFY_CORPORATION_REPUTATION`.
-- Give energy a purpose: opportunities cost energy to accept (scaled by difficulty); can't start work exhausted.
-- Cap runtime stat growth (STAT_XP) at 20 so the d20 math stays meaningful.
-
-**Files:** `apps/api/src/modules/opportunities/opportunities.service.ts` (requirement context ~line 1136, resolve rewards/risks ~line 500), `packages/game-rules/src/types.ts`, seed data energy costs.
-
 ### 2. Character progression: XP & levels 📈
 - `xp`, `level`, `unspentStatPoints` on `Character`; XP awarded per completed opportunity (scaled by difficulty, partial on failure).
 - Level curve; on level-up: stat points to spend + small max-health/energy bumps.
@@ -144,6 +134,7 @@ Run the BullMQ worker (`apps/worker`) through Docker Compose for sharded backgro
 
 ## Shipped
 
+- **Roadmap 1: Fix broken core mechanics** (2026-07-15) — The requirement context now includes the character's inventory (both definition and instance ids), so `ITEM_REQUIRED` requirements actually work, with a friendly failure message. The live resolver applies the previously-dropped failure consequences: `MODIFY_CREDITS` (clamped at 0), `MODIFY_FACTION_REPUTATION`, `MODIFY_CORPORATION_REPUTATION`, and `MODIFY_STAT` on energy. Energy now has a real gameplay role: accepting any gig/job/quest costs energy scaled by DC (`calculateOpportunityEnergyCost` in `packages/game-rules/src/activity-costs.ts`, 5–25 range) — too exhausted means you must rest first; the board shows a ⚡ cost badge and an EXHAUSTED button state. STAT_XP gains are capped at `STAT_CAP = 20` (`packages/game-rules/src/progression.ts`) so d20 checks stay meaningful. New tests: 4 in game-rules, 3 in API accept flow.
 - **Stale test fix** — `opportunities.service.spec.ts` expected the pre-d20 default difficulty (1); the service defaults to DC 10. Suite green again (2026-07-15).
 - **1. Realtime tick updates via SSE** — `GET /simulation/stream` now publishes `simulation.tick.completed` plus notable NPC activity as server-sent events. The player dashboard and opportunity board subscribe through `apps/web/src/lib/use-event-stream.ts`, so due completions arrive without the old 12-second polling loop.
 - **2. Quest chains and prerequisite unlocks** — Opportunity availability now respects completed-quest history, `UNLOCK_QUEST` reward edges, one-off quest completion, and shared requirement checks. The seeded story line is now a 3-step chain (`Welcome to Antrolus` → `Something in the Cargo` → `Pigeon95 Secret`) with `questData.chainId`, step counts, and board-side progress/hint display.

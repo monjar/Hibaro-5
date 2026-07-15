@@ -238,6 +238,9 @@ export default function OpportunitiesPage() {
       : true;
     const cannotTakeAnotherJob =
       opp.kind === 'JOB' && !employedOpportunityIds.has(opp.id) && activeJobs.length > 0;
+    const tooExhausted = Boolean(
+      character && typeof opp.energyCost === 'number' && character.energy < opp.energyCost,
+    );
     const hoverClass =
       accent === 'cyan'
         ? 'hover:border-heliora-cyan/40'
@@ -275,6 +278,13 @@ export default function OpportunitiesPage() {
         )}
         <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
           <span className="text-heliora-text-dim">⏱ {opp.durationMinutes ?? '?'}m</span>
+          {typeof opp.energyCost === 'number' && (
+            <Tooltip content="Energy spent when you accept this activity. Rest to recover.">
+              <span className={tooExhausted ? 'font-bold text-heliora-red' : 'text-heliora-text-dim'}>
+                ⚡ -{opp.energyCost}
+              </span>
+            </Tooltip>
+          )}
           {(opp.rewards as RewardEntry[]).map((reward, index) => {
             if (reward.type === 'CREDITS') {
               return (
@@ -400,8 +410,14 @@ export default function OpportunitiesPage() {
         ) : (
           <button
             onClick={() => void accept(opp)}
-            disabled={accepting === opp.id || !requirementsMet || hasActiveActivity}
-            title={hasActiveActivity ? 'Finish your current activity first' : undefined}
+            disabled={accepting === opp.id || !requirementsMet || hasActiveActivity || tooExhausted}
+            title={
+              hasActiveActivity
+                ? 'Finish your current activity first'
+                : tooExhausted
+                  ? `You need ${opp.energyCost} energy — rest at a safehouse, clinic, or hub first`
+                  : undefined
+            }
             className={`w-full rounded border px-3 py-1.5 text-xs font-mono font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
               accent === 'cyan'
                 ? 'border-heliora-cyan/50 bg-heliora-cyan/20 text-heliora-cyan hover:bg-heliora-cyan/30'
@@ -416,9 +432,11 @@ export default function OpportunitiesPage() {
                 ? 'LOCKED'
                 : hasActiveActivity
                   ? 'BUSY'
-                  : opp.kind === 'JOB'
-                    ? 'WORK SHIFT'
-                    : 'ACCEPT'}
+                  : tooExhausted
+                    ? 'EXHAUSTED'
+                    : opp.kind === 'JOB'
+                      ? 'WORK SHIFT'
+                      : 'ACCEPT'}
           </button>
         )}
       </div>

@@ -11,6 +11,8 @@ import {
   RequirementContext,
   Reward as GameRulesReward,
   Risk as GameRulesRisk,
+  STAT_CAP,
+  calculateOpportunityEnergyCost,
   calculateOpportunitySuccessChance,
   checkRequirements,
   getOpportunityCheckProfile,
@@ -74,6 +76,7 @@ type PlannedOutcome = {
 type OpportunityProgress = {
   plannedOutcome?: PlannedOutcome;
   rest?: RestProgress;
+  energyCost?: number;
 };
 
 type RestProfileInput = {
@@ -289,17 +292,22 @@ export class OpportunitiesService {
     const unlockSources = this.buildQuestUnlockSources(all);
     const characterStats = this.toCharacterStats(character);
 
-    return all.filter((opp) => {
-      if (this.isHiddenSystemOpportunity(opp)) return false;
-      if (inProgressIds.has(opp.id)) return false;
-      if (this.isOneOffQuestCompleted(opp, completedQuestIds)) return false;
-      if (!this.isQuestUnlocked(opp, completedQuestIds, unlockSources)) return false;
-      return checkRequirements(
-        characterStats,
-        this.readRequirements(opp.requirements),
-        requirementContext,
-      ).passed;
-    });
+    return all
+      .filter((opp) => {
+        if (this.isHiddenSystemOpportunity(opp)) return false;
+        if (inProgressIds.has(opp.id)) return false;
+        if (this.isOneOffQuestCompleted(opp, completedQuestIds)) return false;
+        if (!this.isQuestUnlocked(opp, completedQuestIds, unlockSources)) return false;
+        return checkRequirements(
+          characterStats,
+          this.readRequirements(opp.requirements),
+          requirementContext,
+        ).passed;
+      })
+      .map((opp) => ({
+        ...opp,
+        energyCost: calculateOpportunityEnergyCost({ difficulty: opp.difficulty }),
+      }));
   }
 
   async findInstancesForCharacter(characterId: string, playerId: string) {
@@ -403,11 +411,23 @@ export class OpportunitiesService {
       );
     }
 
+    const energyCost = calculateOpportunityEnergyCost({ difficulty: definition.difficulty });
+    if ((character.energy ?? 0) < energyCost) {
+      throw new BadRequestException(
+        `Too exhausted for this work: it costs ${energyCost} energy and you have ${character.energy}. Rest at a safehouse, clinic, or hub first.`,
+      );
+    }
+
     const now = new Date();
     const completesAt = definition.durationMinutes
       ? new Date(now.getTime() + definition.durationMinutes * 60 * 1000)
       : new Date(now.getTime() + 60 * 60 * 1000);
     const plannedOutcome = this.planOutcome(character, definition);
+
+    await this.prisma.character.update({
+      where: { id: characterId },
+      data: { energy: Math.max(0, (character.energy ?? 0) - energyCost) },
+    });
 
     const instance = await this.prisma.opportunityInstance.create({
       data: {
@@ -416,7 +436,7 @@ export class OpportunitiesService {
         status: 'IN_PROGRESS',
         startedAt: now,
         completesAt,
-        progress: { plannedOutcome } as never,
+        progress: { plannedOutcome, energyCost } as never,
       },
       include: { definition: true },
     });
@@ -505,8 +525,8 @@ export class OpportunitiesService {
           appliedRewards.push(reward);
         } else if (reward.type === 'STAT_XP') {
           const currentVal = characterUpdates[reward.key] ?? character[reward.key] ?? 0;
-          if (Math.random() < STAT_XP_GAIN_PROBABILITY) {
-            characterUpdates[reward.key] = currentVal + 1;
+          if (Math.random() < STAT_XP_GAIN_PROBABILITY && currentVal < STAT_CAP) {
+            characterUpdates[reward.key] = Math.min(STAT_CAP, currentVal + 1);
           }
           appliedRewards.push(reward);
         } else if (reward.type === 'ITEM' && typeof reward.itemDefinitionId === 'string') {
@@ -582,6 +602,58 @@ export class OpportunitiesService {
             } else if (consequence.type === 'MODIFY_STAT' && consequence.key === 'health') {
               const currentHealth = characterUpdates.health ?? character.health ?? 100;
               characterUpdates.health = Math.max(0, currentHealth + consequence.value);
+              appliedRisks.push(consequence);
+            } else if (consequence.type === 'MODIFY_STAT' && consequence.key === 'energy') {
+              const currentEnergy = characterUpdates.energy ?? character.energy ?? 0;
+              characterUpdates.energy = Math.min(
+                character.maxEnergy ?? 100,
+                Math.max(0, currentEnergy + consequence.value),
+              );
+              appliedRisks.push(consequence);
+            } else if (consequence.type === 'MODIFY_CREDITS') {
+              const currentCredits = characterUpdates.credits ?? character.credits ?? 0;
+              characterUpdates.credits = Math.max(
+                0,
+                this.roundCredits(currentCredits + (consequence.value ?? 0)),
+              );
+              appliedRisks.push(consequence);
+            } else if (
+              consequence.type === 'MODIFY_FACTION_REPUTATION' &&
+              typeof consequence.factionId === 'string'
+            ) {
+              await this.upsertRelationship(
+                'CHARACTER',
+                character.id,
+                'FACTION',
+                consequence.factionId,
+                'REPUTATION',
+                consequence.value ?? 0,
+              );
+              relationshipChanges.push({
+                targetType: 'FACTION',
+                targetId: consequence.factionId,
+                relationshipType: RelationshipType.REPUTATION,
+                delta: consequence.value ?? 0,
+              });
+              appliedRisks.push(consequence);
+            } else if (
+              consequence.type === 'MODIFY_CORPORATION_REPUTATION' &&
+              typeof consequence.corporationId === 'string'
+            ) {
+              await this.upsertRelationship(
+                'CHARACTER',
+                character.id,
+                'CORPORATION',
+                consequence.corporationId,
+                'REPUTATION',
+                consequence.value ?? 0,
+              );
+              relationshipChanges.push({
+                targetType: 'CORPORATION',
+                targetId: consequence.corporationId,
+                relationshipType: RelationshipType.REPUTATION,
+                delta: consequence.value ?? 0,
+              });
               appliedRisks.push(consequence);
             }
           }
@@ -1134,7 +1206,7 @@ export class OpportunitiesService {
   }
 
   private async buildRequirementContext(characterId: string): Promise<RequirementContext> {
-    const [relationships, completedQuestInstances] = await Promise.all([
+    const [relationships, completedQuestInstances, inventoryItems] = await Promise.all([
       this.prisma.relationship.findMany({
         where: {
           sourceType: 'CHARACTER',
@@ -1150,6 +1222,10 @@ export class OpportunitiesService {
         },
         select: { definitionId: true },
       }),
+      this.prisma.itemInstance.findMany({
+        where: { ownerType: 'CHARACTER', ownerId: characterId },
+        select: { id: true, itemDefinitionId: true },
+      }),
     ]);
 
     const factionReputations: Record<string, number> = {};
@@ -1164,10 +1240,17 @@ export class OpportunitiesService {
       }
     }
 
+    // ITEM_REQUIRED requirements may reference either an item definition id
+    // or a specific item instance id, so expose both.
+    const inventoryItemIds = [
+      ...new Set(inventoryItems.flatMap((item) => [item.itemDefinitionId, item.id])),
+    ];
+
     return {
       factionReputations,
       corporationReputations,
       completedQuestIds: completedQuestInstances.map((instance) => instance.definitionId),
+      inventoryItemIds,
     };
   }
 
@@ -1307,6 +1390,8 @@ export class OpportunitiesService {
       }
       case 'QUEST_COMPLETED':
         return 'Requirement not met: complete the prerequisite quest chain first';
+      case 'ITEM_REQUIRED':
+        return `Requirement not met: you need ${requirement.name ?? 'a specific item'} in your inventory`;
       default:
         return `Requirement not met: ${requirement.type}`;
     }

@@ -101,6 +101,8 @@ export interface OpportunityDefinition {
   } | null;
   startsAvailableAt?: string | null;
   endsAvailableAt?: string | null;
+  /** Energy deducted on accept; present on /opportunities/available responses. */
+  energyCost?: number;
 }
 
 export interface AdminOpportunityInput {
