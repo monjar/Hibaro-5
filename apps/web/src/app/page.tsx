@@ -92,6 +92,9 @@ export default function HomePage() {
   const [deciding, setDeciding] = useState<string | null>(null);
   const [daily, setDaily] = useState<DailyStatus | null>(null);
   const [claimingDaily, setClaimingDaily] = useState(false);
+  const [worldFeed, setWorldFeed] = useState<
+    Array<{ id: number; icon: string; text: string; at: number }>
+  >([]);
   const now = useNow();
   const rewardReferenceLookup = useRewardReferenceLookup();
 
@@ -116,16 +119,43 @@ export default function HomePage() {
     }
   }, [refresh, session.characterId, session.player?.id]);
 
-  const handleTick = useCallback(() => {
-    void refreshAll();
-  }, [refreshAll]);
+  const handleStreamEvent = useCallback(
+    (event: { type: string; payload: unknown }) => {
+      if (event.type === 'simulation.tick.completed') {
+        void refreshAll();
+        return;
+      }
+      const payload = (event.payload ?? {}) as Record<string, unknown>;
+      let entry: { icon: string; text: string } | null = null;
+      if (event.type === 'npc.activity.recorded' && typeof payload.summary === 'string') {
+        entry = { icon: '🛰', text: payload.summary };
+      } else if (event.type === 'travel.completed') {
+        const destination = payload.destination as
+          | { districtName?: string; planetName?: string }
+          | undefined;
+        const place = destination?.districtName ?? destination?.planetName;
+        if (place && payload.characterId !== session.characterId) {
+          entry = { icon: '🚀', text: `An operator arrived in ${place}` };
+        }
+      }
+      if (entry) {
+        const stamped = { ...entry, id: Date.now() + Math.random(), at: Date.now() };
+        setWorldFeed((prev) => [stamped, ...prev].slice(0, 10));
+      }
+    },
+    [refreshAll, session.characterId],
+  );
 
   useEffect(() => {
     if (!session.characterId) return;
     void refreshAll();
   }, [refreshAll, session.characterId]);
 
-  useEventStream(['simulation.tick.completed'], handleTick, Boolean(session.characterId));
+  const streamStatus = useEventStream(
+    ['simulation.tick.completed', 'npc.activity.recorded', 'travel.completed'],
+    handleStreamEvent,
+    Boolean(session.characterId),
+  );
 
   async function resolveInstance(instanceId: string) {
     setResolving(instanceId);
@@ -788,6 +818,43 @@ export default function HomePage() {
           </div>
         </Panel>
       )}
+
+      <Panel title="World Feed" accent="cyan">
+        <div className="mb-2 flex items-center gap-2 text-[11px] font-mono text-heliora-text-dim">
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${
+              streamStatus === 'open'
+                ? 'bg-heliora-green'
+                : streamStatus === 'reconnecting'
+                  ? 'bg-heliora-red animate-pulse'
+                  : 'bg-heliora-yellow animate-pulse'
+            }`}
+          />
+          {streamStatus === 'open'
+            ? 'LIVE — the world moves while you watch'
+            : streamStatus === 'reconnecting'
+              ? 'LINK LOST — reconnecting…'
+              : 'CONNECTING…'}
+        </div>
+        {worldFeed.length === 0 ? (
+          <p className="text-xs text-heliora-text-dim">
+            Waiting for signals… NPC crews, rival operators, and market moves show up here in
+            realtime.
+          </p>
+        ) : (
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {worldFeed.map((entry) => (
+              <div key={entry.id} className="flex items-start gap-2 text-xs">
+                <span className="shrink-0">{entry.icon}</span>
+                <span className="flex-1 text-heliora-text">{entry.text}</span>
+                <span className="shrink-0 text-heliora-text-dim">
+                  {formatTimeAgo(new Date(entry.at).toISOString())}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
 
       {activity.length > 0 && (
         <Panel title="Activity Log" accent="yellow">
