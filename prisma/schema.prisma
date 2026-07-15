@@ -216,6 +216,12 @@ enum JobEmploymentStatus {
   QUIT
 }
 
+enum PlayerBountyStatus {
+  OPEN
+  CLAIMED
+  CANCELLED
+}
+
 // ==================== MODELS ====================
 
 model Player {
@@ -270,6 +276,11 @@ model Character {
   activityLogs           ActivityLog[]
   stockHoldings          StockHolding[]
   jobEmployments         JobEmployment[]
+  duelsStarted           Duel[]                  @relation("DuelAttacker")
+  duelsDefended          Duel[]                  @relation("DuelDefender")
+  bountiesOnHead         PlayerBounty[]          @relation("BountyTarget")
+  bountiesPosted         PlayerBounty[]          @relation("BountyPoster")
+  bountiesClaimed        PlayerBounty[]          @relation("BountyClaimer")
 }
 
 model SolarSystem {
@@ -548,6 +559,44 @@ model ActivityLog {
   relatedEntities Json?
   metadata        Json?
   createdAt       DateTime     @default(now())
+}
+
+model Duel {
+  id                 String    @id @default(uuid())
+  attackerId         String
+  attacker           Character @relation("DuelAttacker", fields: [attackerId], references: [id])
+  defenderId         String
+  defender           Character @relation("DuelDefender", fields: [defenderId], references: [id])
+  districtId         String?
+  wagerCredits       Float     @default(0)
+  attackerRoll       Int
+  attackerTotal      Float
+  defenderRoll       Int
+  defenderTotal      Float
+  winnerId           String
+  creditsTransferred Float     @default(0)
+  createdAt          DateTime  @default(now())
+
+  @@index([attackerId, createdAt])
+  @@index([defenderId, createdAt])
+}
+
+model PlayerBounty {
+  id          String             @id @default(uuid())
+  targetId    String
+  target      Character          @relation("BountyTarget", fields: [targetId], references: [id])
+  postedById  String
+  postedBy    Character          @relation("BountyPoster", fields: [postedById], references: [id])
+  amount      Float
+  reason      String?
+  status      PlayerBountyStatus @default(OPEN)
+  claimedById String?
+  claimedBy   Character?         @relation("BountyClaimer", fields: [claimedById], references: [id])
+  claimedAt   DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@index([status, createdAt])
+  @@index([targetId, status])
 }
 
 model StockPriceHistory {

@@ -840,6 +840,88 @@ export const REALTIME_EVENT_CONTRACTS: RealtimeEventContract[] = [
   },
 ];
 
+export interface NearbyPlayer {
+  id: string;
+  name: string;
+  level: number;
+  wantedLevel: number;
+  pvpProtected: boolean;
+}
+
+export interface PvpContestSide {
+  roll: number;
+  statModifier: number;
+  total: number;
+}
+
+export interface Duel {
+  id: string;
+  attackerId: string;
+  defenderId: string;
+  districtId?: string | null;
+  wagerCredits: number;
+  attackerRoll: number;
+  attackerTotal: number;
+  defenderRoll: number;
+  defenderTotal: number;
+  winnerId: string;
+  creditsTransferred: number;
+  createdAt: string;
+  attacker?: { id: string; name: string; level: number };
+  defender?: { id: string; name: string; level: number };
+}
+
+export interface DuelResult {
+  duel: Duel;
+  result: {
+    attackerWins: boolean;
+    winnerName: string;
+    loserName: string;
+    creditsTransferred: number;
+    attacker: PvpContestSide;
+    defender: PvpContestSide;
+    attackerHeat: number;
+  };
+}
+
+export interface PlayerBounty {
+  id: string;
+  targetId: string;
+  postedById: string;
+  amount: number;
+  reason?: string | null;
+  status: 'OPEN' | 'CLAIMED' | 'CANCELLED';
+  claimedById?: string | null;
+  claimedAt?: string | null;
+  createdAt: string;
+  target?: {
+    id: string;
+    name: string;
+    level: number;
+    currentPlanet?: { id: string; name: string } | null;
+    currentDistrictId?: string | null;
+  };
+  postedBy?: { id: string; name: string };
+}
+
+export interface BountyClaimResult {
+  claimed: boolean;
+  amount: number;
+  contest: { attacker: PvpContestSide; defender: PvpContestSide; attackerWins: boolean };
+  targetName: string;
+}
+
+export interface LeaderboardRow {
+  rank: number;
+  characterId: string;
+  name: string;
+  level: number;
+  credits: number;
+  duelsWon: number;
+  duelsLost: number;
+  bountiesClaimed: number;
+}
+
 export interface ApiClientConfig {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -1103,6 +1185,21 @@ export function createApiClient(config?: ApiClientConfig) {
       post<unknown>(`/shops/${buildingId}/buy`, { itemInstanceId, characterId }),
     shopSell: (buildingId: string, itemInstanceId: string, characterId: string) =>
       post<unknown>(`/shops/${buildingId}/sell`, { itemInstanceId, characterId }),
+    // pvp
+    getLeaderboard: () => request<LeaderboardRow[]>('/pvp/leaderboard'),
+    getNearbyPlayers: (characterId: string) =>
+      request<NearbyPlayer[]>(`/pvp/players/${characterId}`),
+    startDuel: (characterId: string, targetId: string, wager: number) =>
+      post<DuelResult>('/pvp/duel', { characterId, targetId, wager }),
+    getDuelHistory: (characterId: string, limit = 15) =>
+      request<Duel[]>(`/pvp/duels/${characterId}?limit=${limit}`),
+    getOpenBounties: () => request<PlayerBounty[]>('/pvp/bounties'),
+    postBounty: (characterId: string, targetId: string, amount: number, reason?: string) =>
+      post<PlayerBounty>('/pvp/bounties', { characterId, targetId, amount, reason }),
+    claimBounty: (bountyId: string, characterId: string) =>
+      post<BountyClaimResult>(`/pvp/bounties/${bountyId}/claim`, { characterId }),
+    cancelBounty: (bountyId: string, characterId: string) =>
+      post<PlayerBounty>(`/pvp/bounties/${bountyId}/cancel`, { characterId }),
     // jobs
     listJobs: (characterId: string) =>
       request<JobEmployment[]>(`/jobs/employments/${characterId}`),
