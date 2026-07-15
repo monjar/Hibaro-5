@@ -1580,6 +1580,28 @@ async function main() {
     },
   });
 
+  // Spawn-only follow-up: no startsAt, so it stays dormant until the
+  // Valerina Signal Leak's SPAWN_EVENT effect activates it.
+  await prisma.worldEvent.upsert({
+    where: { id: 'event-ghost-investigation' },
+    update: {},
+    create: {
+      id: 'event-ghost-investigation',
+      title: 'Ghost Investigation',
+      description:
+        'The Valerina Ghosts are sweeping the mire for the source of the leaked signal. Outsiders are watched closely.',
+      scope: 'DISTRICT',
+      affectedEntities: [{ type: 'DISTRICT', id: blacksiteMire.id }],
+      requirements: [],
+      effects: [
+        { type: 'MODIFY_RISK', target: 'INVESTIGATION', modifier: 0.15 },
+        { type: 'MODIFY_REWARD', target: 'SECURITY', modifier: 0.2 },
+      ],
+      startsAt: null,
+      status: 'SCHEDULED',
+    },
+  });
+
   await prisma.worldEvent.upsert({
     where: { id: 'event-teraluma-market-rally' },
     update: {},

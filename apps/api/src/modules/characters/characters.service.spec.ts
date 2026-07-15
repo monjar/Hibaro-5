@@ -35,6 +35,9 @@ function makePrismaMock() {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    worldEvent: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     activityLog: {
       create: jest.fn(),
     },

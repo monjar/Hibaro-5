@@ -10,6 +10,8 @@ import {
   STAT_CAP,
   aggregateEquipmentBonuses,
   calculateDailyRent,
+  collectActiveEffects,
+  dangerDeltaFor,
   slotForCategory,
   xpThresholdForLevel,
   xpToNextLevel,
@@ -37,6 +39,16 @@ export class CharactersService {
     private prisma: PrismaService,
     private opportunitiesService: OpportunitiesService,
   ) {}
+
+  /** Extra danger at the destination from active world events (e.g. gang tension). */
+  private async getEventDangerDelta(planetId: string, districtId: string): Promise<number> {
+    const activeEvents = await this.prisma.worldEvent.findMany({
+      where: { status: 'ACTIVE' },
+      select: { scope: true, affectedEntities: true, effects: true },
+    });
+    const effects = collectActiveEffects(activeEvents, { planetId, districtId });
+    return dangerDeltaFor(effects, districtId);
+  }
 
   private async getActiveTravelBlock(characterId: string) {
     const activeOpportunity = await this.prisma.opportunityInstance.findFirst({
@@ -653,12 +665,21 @@ export class CharactersService {
       throw new BadRequestException('District does not belong to the requested planet');
     }
 
+    const eventDangerDelta = await this.getEventDangerDelta(
+      destinationPlanet.id,
+      destinationDistrict.id,
+    );
+    const effectiveDistrictDanger = Math.max(
+      0,
+      destinationDistrict.dangerLevel + eventDangerDelta,
+    );
+
     const travel = assessTravel({
       samePlanet: character.currentPlanetId === destinationPlanet.id,
       sameDistrict: character.currentDistrictId === destinationDistrict.id,
       destinationPlanetDanger: destinationPlanet.dangerLevel,
       destinationPlanetLaw: destinationPlanet.lawLevel,
-      destinationDistrictDanger: destinationDistrict.dangerLevel,
+      destinationDistrictDanger: effectiveDistrictDanger,
       destinationDistrictLaw: destinationDistrict.lawLevel,
       destinationDistrictEconomy: destinationDistrict.economyLevel,
       currentDistrictDanger: character.currentDistrict?.dangerLevel,
@@ -668,6 +689,13 @@ export class CharactersService {
     const travelCost = travel.travelCost + standing.travelSurcharge;
     const warnings = [
       ...(activeTravelBlock ? [activeTravelBlock.warning] : []),
+      ...(eventDangerDelta !== 0
+        ? [
+            eventDangerDelta > 0
+              ? `⚡ Active world events raise the danger here (+${eventDangerDelta})`
+              : `⚡ Active world events lower the danger here (${eventDangerDelta})`,
+          ]
+        : []),
       ...standing.warnings,
     ];
     const blocked = Boolean(activeTravelBlock) || standing.blocked;
@@ -859,12 +887,20 @@ export class CharactersService {
       }
     }
 
+    const eventDangerDelta = await this.getEventDangerDelta(
+      destinationPlanet.id,
+      destinationDistrict.id,
+    );
+
     const travel = assessTravel({
       samePlanet: character.currentPlanetId === destinationPlanet.id,
       sameDistrict: character.currentDistrictId === destinationDistrict.id,
       destinationPlanetDanger: destinationPlanet.dangerLevel,
       destinationPlanetLaw: destinationPlanet.lawLevel,
-      destinationDistrictDanger: destinationDistrict.dangerLevel,
+      destinationDistrictDanger: Math.max(
+        0,
+        destinationDistrict.dangerLevel + eventDangerDelta,
+      ),
       destinationDistrictLaw: destinationDistrict.lawLevel,
       destinationDistrictEconomy: destinationDistrict.economyLevel,
       currentDistrictDanger: character.currentDistrict?.dangerLevel,

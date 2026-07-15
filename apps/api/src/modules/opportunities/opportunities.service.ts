@@ -20,9 +20,12 @@ import {
   calculateOpportunityEnergyCost,
   calculateOpportunitySuccessChance,
   checkRequirements,
+  collectActiveEffects,
   computeFinalSuccess,
   getOpportunityCheckProfile,
   resolveChoice,
+  rewardMultiplierFor,
+  riskDeltaFor,
   rollOpportunityCheck,
   totalDecisionCreditsBonus,
   totalDecisionRollBonus,
@@ -650,6 +653,19 @@ export class OpportunitiesService {
     const appliedRewards: any[] = [];
     const appliedRisks: any[] = [];
 
+    // Active world events can scale payouts and shift failure risks for
+    // matching opportunity types at the character's location.
+    const activeWorldEvents = await this.prisma.worldEvent.findMany({
+      where: { status: 'ACTIVE' },
+      select: { scope: true, affectedEntities: true, effects: true },
+    });
+    const locationEffects = collectActiveEffects(activeWorldEvents, {
+      planetId: character.currentPlanetId,
+      districtId: character.currentDistrictId,
+    });
+    const eventRewardMultiplier = rewardMultiplierFor(locationEffects, definition.type);
+    const eventRiskDelta = riskDeltaFor(locationEffects, definition.type);
+
     const characterUpdates: any = {};
 
     if (success && decisionCreditsBonus > 0) {
@@ -663,8 +679,13 @@ export class OpportunitiesService {
       for (const reward of rewards) {
         if (reward.type === 'CREDITS') {
           const currentCredits = characterUpdates.credits ?? character.credits ?? 0;
-          characterUpdates.credits = currentCredits + (reward.value ?? 0);
-          appliedRewards.push(reward);
+          const adjustedValue = Math.round((reward.value ?? 0) * eventRewardMultiplier);
+          characterUpdates.credits = currentCredits + adjustedValue;
+          appliedRewards.push(
+            eventRewardMultiplier !== 1
+              ? { ...reward, value: adjustedValue, baseValue: reward.value ?? 0 }
+              : reward,
+          );
         } else if (reward.type === 'STAT_XP') {
           const currentVal = characterUpdates[reward.key] ?? character[reward.key] ?? 0;
           if (Math.random() < STAT_XP_GAIN_PROBABILITY && currentVal < STAT_CAP) {
@@ -731,7 +752,11 @@ export class OpportunitiesService {
     } else {
       for (const risk of risks) {
         const riskRoll = Math.random();
-        if (riskRoll < (risk.probability ?? DEFAULT_RISK_PROBABILITY)) {
+        const riskProbability = Math.min(
+          1,
+          Math.max(0, (risk.probability ?? DEFAULT_RISK_PROBABILITY) + eventRiskDelta),
+        );
+        if (riskRoll < riskProbability) {
           const consequences = risk.consequences || [];
           for (const consequence of consequences) {
             if (consequence.type === 'MODIFY_WANTED_LEVEL') {
@@ -857,6 +882,10 @@ export class OpportunitiesService {
               adjustedTotal: finalCheck.adjustedTotal,
               rescued: decisionRollBonus !== 0 && finalCheck.success && !check.success,
             }
+          : null,
+      worldEventModifiers:
+        eventRewardMultiplier !== 1 || eventRiskDelta !== 0
+          ? { rewardMultiplier: eventRewardMultiplier, riskDelta: eventRiskDelta }
           : null,
       progression: {
         xpGained,

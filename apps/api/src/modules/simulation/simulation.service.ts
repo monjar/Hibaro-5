@@ -3,11 +3,14 @@ import { Prisma, RelationshipType } from '@prisma/client';
 import { REALTIME_EVENT_CONTRACTS } from '@heliora/platform-sdk';
 import {
   FACTION_WAR_CONTEST_CHANCE,
+  collectActiveEffects,
   computeNextStockPrice,
   deriveSubSeed,
+  economyDeltaFor,
   evaluateRentCycle,
   factionPresenceScore,
   resolveDistrictContest,
+  spawnEventIds,
 } from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpportunitiesService, REST_OPPORTUNITY_ID } from '../opportunities/opportunities.service';
@@ -504,7 +507,38 @@ export class SimulationService {
       ),
     ]);
 
-    return { activated: scheduledEvents.length, resolved: expiringEvents.length };
+    // SPAWN_EVENT effects: an activating event can trigger follow-up events.
+    // Spawn targets with no startsAt stay dormant until spawned this way.
+    let spawned = 0;
+    for (const event of scheduledEvents) {
+      for (const spawnId of spawnEventIds(event.effects)) {
+        const target = await this.prisma.worldEvent.findUnique({ where: { id: spawnId } });
+        if (!target || target.status !== 'SCHEDULED') continue;
+        await this.prisma.worldEvent.update({
+          where: { id: spawnId },
+          data: {
+            status: 'ACTIVE',
+            startsAt: now,
+            endsAt: target.endsAt ?? new Date(now.getTime() + 24 * 3_600_000),
+            triggeredByType: 'WORLD_EVENT',
+            triggeredById: event.id,
+          },
+        });
+        await this.prisma.activityLog.create({
+          data: {
+            type: 'WORLD_EVENT_TRIGGERED',
+            message: `⚡ ${event.title} triggered a follow-up event: ${target.title}`,
+            relatedEntities: { sourceEventId: event.id, spawnedEventId: spawnId },
+          },
+        });
+        spawned += 1;
+      }
+    }
+
+    return {
+      activated: scheduledEvents.length + spawned,
+      resolved: expiringEvents.length,
+    };
   }
 
   private async advanceEconomy() {
@@ -523,13 +557,20 @@ export class SimulationService {
           event.scope === 'PLANET' ||
           JSON.stringify(event.affectedEntities).includes(planet.id),
       ).length;
+      // Authored MODIFY_ECONOMY effects push the drift with direction, on
+      // top of the generic disruption pressure every active event exerts.
+      const economyBoost = economyDeltaFor(
+        collectActiveEffects(activeEvents, { planetId: planet.id }),
+        planet.id,
+      );
       const nextEconomyLevel = clampWorldMetric(
         Math.round(
           (planet.economyLevel +
             avgDistrictEconomy +
             planet.lawLevel -
             planet.dangerLevel -
-            eventPressure) /
+            eventPressure +
+            economyBoost) /
             2,
         ),
         1,
