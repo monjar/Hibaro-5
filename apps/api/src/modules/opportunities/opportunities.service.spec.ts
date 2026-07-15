@@ -282,7 +282,7 @@ describe('OpportunitiesService admin CRUD', () => {
       data: expect.objectContaining({
         title: 'Move boxes',
         kind: 'GIG',
-        difficulty: 1,
+        difficulty: 10,
         durationMinutes: 60,
       }),
     });
