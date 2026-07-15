@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { hashPasswordSync } from './password-hash';
+import { seedExpansion } from './seed-expansion';
 
 const prisma = new PrismaClient();
 const TEST_PLAYER_PASSWORD = process.env.SEED_TEST_PLAYER_PASSWORD ?? 'Heliora123';
@@ -1111,6 +1112,10 @@ async function main() {
       acceptedDescription:
         'The crates are already tagged and staged. Keep them moving, keep your head down, and do not let station security connect the cargo to Red Market.',
       timelineEvents: medicalCratesTimeline,
+      requirements: [
+        { type: 'STAT_MIN', key: 'stealth', value: 5 },
+        { type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' },
+      ],
     },
     create: {
       id: 'opp-move-medical-crates',
@@ -1123,7 +1128,10 @@ async function main() {
       postedByType: 'FACTION',
       postedById: redMarket.id,
       type: 'SMUGGLING',
-      requirements: [{ type: 'STAT_MIN', key: 'stealth', value: 5 }],
+      requirements: [
+        { type: 'STAT_MIN', key: 'stealth', value: 5 },
+        { type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' },
+      ],
       durationMinutes: 10,
       difficulty: 12,
       rewards: [
@@ -1187,6 +1195,10 @@ async function main() {
       acceptedDescription:
         'You are stepping into heat, noise, and a maintenance network held together by emergency clamps. Keep the line online and do not trip the refinery failsafes.',
       timelineEvents: furnaceSensorsTimeline,
+      requirements: [
+        { type: 'STAT_MIN', key: 'engineering', value: 5 },
+        { type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' },
+      ],
     },
     create: {
       id: 'opp-patch-furnace-sensors',
@@ -1199,7 +1211,10 @@ async function main() {
       postedByType: 'CORPORATION',
       postedById: helixDynamics.id,
       type: 'REPAIR',
-      requirements: [{ type: 'STAT_MIN', key: 'engineering', value: 5 }],
+      requirements: [
+        { type: 'STAT_MIN', key: 'engineering', value: 5 },
+        { type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' },
+      ],
       durationMinutes: 15,
       difficulty: 12,
       rewards: [
@@ -1227,6 +1242,7 @@ async function main() {
       difficulty: 10,
       acceptedDescription:
         'Clock in, keep the line fed, and stay ahead of the foreman’s inspection rounds. The refinery pays for output, not excuses.',
+      requirements: [{ type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' }],
       timelineEvents: [
         { minute: 8, description: 'Shift alarms cycle and another cart of raw feedstock slams onto your lane.' },
         { minute: 20, successDescription: 'You settle into a fast rhythm and the crew stops watching you like dead weight.', failureDescription: 'The pace breaks your rhythm and the foreman starts marking missed steps.' },
@@ -1243,7 +1259,7 @@ async function main() {
       postedByType: 'CORPORATION',
       postedById: helixDynamics.id,
       type: 'REPAIR',
-      requirements: [],
+      requirements: [{ type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' }],
       durationMinutes: 30,
       difficulty: 10,
       rewards: [
@@ -1296,6 +1312,7 @@ async function main() {
       acceptedDescription:
         'The route stack is time-boxed and tightly tracked. Miss a handoff and dispatch will know before you finish cursing.',
       timelineEvents: courierLoopTimeline,
+      requirements: [{ type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' }],
     },
     create: {
       id: 'opp-courier-loop',
@@ -1307,7 +1324,7 @@ async function main() {
       postedByType: 'CORPORATION',
       postedById: pigeonCorp.id,
       type: 'DELIVERY',
-      requirements: [],
+      requirements: [{ type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' }],
       durationMinutes: 20,
       difficulty: 10,
       rewards: [
@@ -1582,6 +1599,9 @@ async function main() {
   });
 
   console.log('✅ World events: 5 events seeded');
+
+  // ==================== EXPANSION CONTENT (other planets) ====================
+  await seedExpansion(prisma);
 
   console.log('\n🎮 Heliora seed complete!');
   console.log(`   Player ID: ${testPlayer.id}`);

@@ -1393,7 +1393,8 @@ export class OpportunitiesService {
   }
 
   private async buildRequirementContext(characterId: string): Promise<RequirementContext> {
-    const [relationships, completedQuestInstances, inventoryItems] = await Promise.all([
+    const [relationships, completedQuestInstances, inventoryItems, locationInfo] =
+      await Promise.all([
       this.prisma.relationship.findMany({
         where: {
           sourceType: 'CHARACTER',
@@ -1412,6 +1413,10 @@ export class OpportunitiesService {
       this.prisma.itemInstance.findMany({
         where: { ownerType: 'CHARACTER', ownerId: characterId },
         select: { id: true, itemDefinitionId: true },
+      }),
+      this.prisma.character.findUnique({
+        where: { id: characterId },
+        select: { currentPlanetId: true, currentDistrictId: true },
       }),
     ]);
 
@@ -1438,6 +1443,12 @@ export class OpportunitiesService {
       corporationReputations,
       completedQuestIds: completedQuestInstances.map((instance) => instance.definitionId),
       inventoryItemIds,
+      // PLANET_ACCESS / DISTRICT_ACCESS requirements mean "you must be
+      // there right now" — location-gated content.
+      accessiblePlanetIds: locationInfo?.currentPlanetId ? [locationInfo.currentPlanetId] : [],
+      accessibleDistrictIds: locationInfo?.currentDistrictId
+        ? [locationInfo.currentDistrictId]
+        : [],
     };
   }
 
@@ -1601,6 +1612,10 @@ export class OpportunitiesService {
         return 'Requirement not met: complete the prerequisite quest chain first';
       case 'ITEM_REQUIRED':
         return `Requirement not met: you need ${requirement.name ?? 'a specific item'} in your inventory`;
+      case 'PLANET_ACCESS':
+        return `Requirement not met: you must be on ${requirement.name ?? 'a specific planet'}`;
+      case 'DISTRICT_ACCESS':
+        return `Requirement not met: you must be in ${requirement.name ?? 'a specific district'}`;
       default:
         return `Requirement not met: ${requirement.type}`;
     }
