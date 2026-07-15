@@ -6,6 +6,7 @@ export type SimulationStepName =
   | 'economy'
   | 'corporations'
   | 'district_control'
+  | 'faction_wars'
   | 'energy_decay'
   | 'housing_rent'
   | 'npc_activity'

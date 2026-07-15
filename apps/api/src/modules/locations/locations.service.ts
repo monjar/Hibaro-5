@@ -125,7 +125,15 @@ export class LocationsService {
   async getPlanetById(id: string) {
     const planet = await this.prisma.planet.findUnique({
       where: { id },
-      include: { solarSystem: true, districts: { include: { buildings: true } } },
+      include: {
+        solarSystem: true,
+        districts: {
+          include: {
+            buildings: true,
+            controllingFaction: { select: { id: true, name: true } },
+          },
+        },
+      },
     });
     if (!planet) throw new NotFoundException(`Planet ${id} not found`);
     return planet;

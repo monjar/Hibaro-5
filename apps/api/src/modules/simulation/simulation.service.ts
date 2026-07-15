@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, RelationshipType } from '@prisma/client';
 import { REALTIME_EVENT_CONTRACTS } from '@heliora/platform-sdk';
-import { computeNextStockPrice, evaluateRentCycle } from '@heliora/game-rules';
+import {
+  FACTION_WAR_CONTEST_CHANCE,
+  computeNextStockPrice,
+  evaluateRentCycle,
+  factionPresenceScore,
+  resolveDistrictContest,
+} from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpportunitiesService, REST_OPPORTUNITY_ID } from '../opportunities/opportunities.service';
 import { JobsService } from '../jobs/jobs.service';
@@ -27,6 +33,7 @@ export class SimulationService {
     const worldEvents = await this.syncWorldEvents(now);
     const economy = await this.advanceEconomy();
     const corporations = await this.advanceCorporations();
+    const factionWars = await this.advanceFactionWars();
     const districtControl = await this.buildDistrictControlState();
     const energyDecay = await this.applyEnergyDecay(now);
     const housingRent = await this.collectHousingRent(now);
@@ -59,6 +66,14 @@ export class SimulationService {
         processed: corporations.processed,
         changes: corporations.updated,
         notes: corporations.notes,
+      },
+      {
+        step: 'faction_wars' as const,
+        processed: factionWars.contested,
+        changes: factionWars.flips.length,
+        notes: factionWars.flips.length
+          ? factionWars.flips.map((flip) => flip.summary)
+          : [`${factionWars.contested} district(s) contested, no control changes`],
       },
       {
         step: 'district_control' as const,
@@ -146,8 +161,103 @@ export class SimulationService {
     for (const action of npcActivity.actions) {
       this.realtimeService.publish('npc.activity.recorded', action);
     }
+    for (const flip of factionWars.flips) {
+      // Surfaces in the dashboard World Feed alongside NPC activity.
+      this.realtimeService.publish('npc.activity.recorded', {
+        action: 'FACTION_CONTROL_FLIP',
+        summary: flip.summary,
+        districtId: flip.districtId,
+        factionId: flip.factionId,
+        createdAt: now.toISOString(),
+      });
+    }
 
     return tickSummary;
+  }
+
+  private async advanceFactionWars() {
+    const [factions, factionBuildings, districts] = await Promise.all([
+      this.prisma.faction.findMany({ select: { id: true, name: true, influence: true } }),
+      this.prisma.building.findMany({
+        where: { ownerType: 'FACTION', ownerId: { not: null } },
+        select: { ownerId: true, districtId: true, district: { select: { planetId: true } } },
+      }),
+      this.prisma.district.findMany({
+        select: { id: true, name: true, planetId: true, controllingFactionId: true },
+      }),
+    ]);
+
+    const totalInfluence = factions.reduce(
+      (sum, faction) => sum + Math.max(0, faction.influence),
+      0,
+    );
+    const factionNames = new Map(factions.map((faction) => [faction.id, faction.name]));
+    const flips: Array<{ districtId: string; factionId: string | null; summary: string }> = [];
+    let contested = 0;
+
+    for (const district of districts) {
+      if (Math.random() >= FACTION_WAR_CONTEST_CHANCE) continue;
+      contested += 1;
+
+      const presences = factions
+        .filter((faction) => faction.influence > 0)
+        .map((faction) => ({
+          factionId: faction.id,
+          score: factionPresenceScore({
+            factionId: faction.id,
+            influenceShare:
+              totalInfluence > 0 ? Math.max(0, faction.influence) / totalInfluence : 0,
+            buildingsInDistrict: factionBuildings.filter(
+              (building) =>
+                building.ownerId === faction.id && building.districtId === district.id,
+            ).length,
+            buildingsOnPlanet: factionBuildings.filter(
+              (building) =>
+                building.ownerId === faction.id &&
+                building.district.planetId === district.planetId,
+            ).length,
+            jitter: Math.random(),
+          }),
+        }));
+
+      const result = resolveDistrictContest(district.controllingFactionId, presences);
+      if (!result.flipped || result.controllingFactionId === district.controllingFactionId) {
+        continue;
+      }
+
+      await this.prisma.district.update({
+        where: { id: district.id },
+        data: { controllingFactionId: result.controllingFactionId },
+      });
+
+      const newFactionName = result.controllingFactionId
+        ? factionNames.get(result.controllingFactionId) ?? 'An unknown faction'
+        : null;
+      const previousName = district.controllingFactionId
+        ? factionNames.get(district.controllingFactionId) ?? 'the previous holders'
+        : null;
+      const summary = previousName
+        ? `⚑ ${newFactionName} wrested control of ${district.name} from ${previousName}`
+        : `⚑ ${newFactionName} claimed control of ${district.name}`;
+
+      await this.prisma.activityLog.create({
+        data: {
+          type: 'WORLD_EVENT_TRIGGERED',
+          message: summary,
+          relatedEntities: {
+            districtId: district.id,
+            factionId: result.controllingFactionId,
+            previousFactionId: district.controllingFactionId,
+            challengerScore: result.challengerScore,
+            incumbentScore: result.incumbentScore,
+          },
+        },
+      });
+
+      flips.push({ districtId: district.id, factionId: result.controllingFactionId, summary });
+    }
+
+    return { contested, flips };
   }
 
   async getHistory(limit = 10) {
