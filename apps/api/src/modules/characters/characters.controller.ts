@@ -74,6 +74,16 @@ export class CharactersController {
     return this.charactersService.stopRest(id, player.sub);
   }
 
+  @Post(':id/stats/allocate')
+  @ApiOperation({ summary: 'Spend unspent stat points earned from level-ups' })
+  allocateStatPoints(
+    @Param('id') id: string,
+    @CurrentPlayer() player: AuthenticatedPlayer,
+    @Body() body: { allocations?: Record<string, number> },
+  ) {
+    return this.charactersService.allocateStatPoints(id, player.sub, body?.allocations);
+  }
+
   @Post(':id/items/:itemInstanceId/use')
   @ApiOperation({ summary: 'Consume an item from inventory' })
   useItem(

@@ -198,6 +198,8 @@ enum ActivityType {
   WORLD_EVENT_TRIGGERED
   RELATIONSHIP_CHANGED
   LOCATION_CHANGED
+  LEVEL_UP
+  STAT_TRAINED
 }
 
 enum JobEmploymentStatus {
@@ -249,6 +251,9 @@ model Character {
   stealth           Int           @default(5)
   engineering       Int           @default(5)
   reputation        Int           @default(0)
+  xp                Int           @default(0)
+  level             Int           @default(1)
+  unspentStatPoints Int           @default(0)
   createdAt         DateTime      @default(now())
 
   factionMemberships     FactionMembership[]

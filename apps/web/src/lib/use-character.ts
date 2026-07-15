@@ -23,6 +23,15 @@ export interface CharacterFull {
   stealth: number;
   engineering: number;
   reputation: number;
+  xp: number;
+  level: number;
+  unspentStatPoints: number;
+  progression?: {
+    xpIntoLevel: number;
+    xpForNextLevel: number | null;
+    nextLevelAt: number | null;
+    atMaxLevel: boolean;
+  };
   playerId?: string;
   currentPlanetId?: string | null;
   currentDistrictId?: string | null;

@@ -26,14 +26,6 @@ A full audit of the codebase (game-rules, simulation, API, web app) against "rea
 
 ## Up Next (publishing roadmap, in order)
 
-### 2. Character progression: XP & levels 📈
-- `xp`, `level`, `unspentStatPoints` on `Character`; XP awarded per completed opportunity (scaled by difficulty, partial on failure).
-- Level curve; on level-up: stat points to spend + small max-health/energy bumps.
-- `POST /characters/:id/stats/allocate` to spend points; dashboard UI.
-- `LEVEL_MIN` requirement type for gating content.
-
-**Files:** `prisma/schema.prisma`, `packages/game-rules/src/progression.ts` (new), `apps/api/src/modules/opportunities/opportunities.service.ts`, `apps/api/src/modules/characters/`, `apps/web/src/app/page.tsx`.
-
 ### 3. Equipment system 🔫
 - Equip slots (WEAPON / OUTFIT / TOOL / VEHICLE) on `ItemInstance`; equip/unequip endpoints.
 - Equipped gear grants stat bonuses (read from `weaponData`/`clothingData`/`toolData`/`vehicleData.statBonuses`); effective stats feed the d20 checks and are shown in the UI.
@@ -134,6 +126,7 @@ Run the BullMQ worker (`apps/worker`) through Docker Compose for sharded backgro
 
 ## Shipped
 
+- **Roadmap 2: Character progression — XP, levels, stat points** (2026-07-15) — Characters now have `xp`, `level`, and `unspentStatPoints` (migration `20260715110000_character_progression`). Every resolved gig/job/quest awards XP (`xpRewardForOpportunity`: DC × 6, quests ×1.6, jobs ×0.8, 35% on failure). The level curve is transparent — 100 XP per current level to advance (`packages/game-rules/src/progression.ts`, MAX_LEVEL 50). Each level-up grants +2 stat points and +5 max health/energy, logs a `LEVEL_UP` activity, and is celebrated in the resolve message. `POST /characters/:id/stats/allocate` spends points (validates ownership, pool size, and the 20-point stat cap; logs `STAT_TRAINED`); the dashboard Stats panel has queue-and-confirm training UI and the Operator panel shows a LVL badge + XP progress bar. `GET /characters/:id` now returns a `progression` block (xpIntoLevel / xpForNextLevel). New `LEVEL_MIN` requirement type gates content by level. Tests: 12 progression specs (game-rules) + 4 allocation specs (API).
 - **Roadmap 1: Fix broken core mechanics** (2026-07-15) — The requirement context now includes the character's inventory (both definition and instance ids), so `ITEM_REQUIRED` requirements actually work, with a friendly failure message. The live resolver applies the previously-dropped failure consequences: `MODIFY_CREDITS` (clamped at 0), `MODIFY_FACTION_REPUTATION`, `MODIFY_CORPORATION_REPUTATION`, and `MODIFY_STAT` on energy. Energy now has a real gameplay role: accepting any gig/job/quest costs energy scaled by DC (`calculateOpportunityEnergyCost` in `packages/game-rules/src/activity-costs.ts`, 5–25 range) — too exhausted means you must rest first; the board shows a ⚡ cost badge and an EXHAUSTED button state. STAT_XP gains are capped at `STAT_CAP = 20` (`packages/game-rules/src/progression.ts`) so d20 checks stay meaningful. New tests: 4 in game-rules, 3 in API accept flow.
 - **Stale test fix** — `opportunities.service.spec.ts` expected the pre-d20 default difficulty (1); the service defaults to DC 10. Suite green again (2026-07-15).
 - **1. Realtime tick updates via SSE** — `GET /simulation/stream` now publishes `simulation.tick.completed` plus notable NPC activity as server-sent events. The player dashboard and opportunity board subscribe through `apps/web/src/lib/use-event-stream.ts`, so due completions arrive without the old 12-second polling loop.

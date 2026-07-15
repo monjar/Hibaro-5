@@ -67,6 +67,8 @@ const ACTIVITY_ICONS: Record<string, string> = {
   WORLD_EVENT_TRIGGERED: '⚡',
   RELATIONSHIP_CHANGED: '🤝',
   BUILDING_ENTERED: '🏚️',
+  LEVEL_UP: '⬆️',
+  STAT_TRAINED: '🏋️',
 };
 
 export default function HomePage() {
@@ -78,6 +80,8 @@ export default function HomePage() {
   const [availableQuests, setAvailableQuests] = useState<OpportunityDefinition[]>([]);
   const [resolving, setResolving] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [pendingAlloc, setPendingAlloc] = useState<Record<string, number>>({});
+  const [training, setTraining] = useState(false);
   const now = useNow();
   const rewardReferenceLookup = useRewardReferenceLookup();
 
@@ -116,23 +120,49 @@ export default function HomePage() {
     setMessage('');
     try {
       const result = (await api.resolveOpportunity(instanceId)) as {
-        outcome?: { success?: boolean; appliedRewards?: Array<{ type: string; value: number }> };
+        outcome?: {
+          success?: boolean;
+          appliedRewards?: Array<{ type: string; value: number }>;
+          progression?: { xpGained?: number; levelsGained?: number; level?: number };
+        };
         definition?: { title?: string };
       };
       const outcome = result.outcome;
       const credits = outcome?.appliedRewards?.find((r) => r.type === 'CREDITS');
+      const xpNote = outcome?.progression?.xpGained ? ` · +${outcome.progression.xpGained} XP` : '';
+      const levelNote =
+        (outcome?.progression?.levelsGained ?? 0) > 0
+          ? ` · ⬆ LEVEL UP! Now level ${outcome?.progression?.level}`
+          : '';
       if (outcome?.success) {
         setMessage(
-          `✅ ${result.definition?.title ?? 'Job'} succeeded${credits ? ` — +$${credits.value}` : ''}`,
+          `✅ ${result.definition?.title ?? 'Job'} succeeded${credits ? ` — +$${credits.value}` : ''}${xpNote}${levelNote}`,
         );
       } else {
-        setMessage(`❌ ${result.definition?.title ?? 'Job'} failed`);
+        setMessage(`❌ ${result.definition?.title ?? 'Job'} failed${xpNote}${levelNote}`);
       }
       await refreshAll();
     } catch (e) {
       setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setResolving(null);
+      setTimeout(() => setMessage(''), 5000);
+    }
+  }
+
+  async function trainStats() {
+    if (!session.characterId || Object.keys(pendingAlloc).length === 0) return;
+    setTraining(true);
+    setMessage('');
+    try {
+      await api.allocateStatPoints(session.characterId, pendingAlloc);
+      setPendingAlloc({});
+      setMessage('✅ Training complete');
+      await refresh();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setTraining(false);
       setTimeout(() => setMessage(''), 5000);
     }
   }
@@ -193,11 +223,39 @@ export default function HomePage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Panel title="Operator" accent="cyan" glow>
           <div className="mb-4">
-            <h2 className="text-heliora-cyan text-2xl font-bold font-mono">{character.name}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-heliora-cyan text-2xl font-bold font-mono">{character.name}</h2>
+              <span className="rounded border border-heliora-yellow/50 bg-heliora-yellow/10 px-1.5 py-0.5 text-xs font-mono font-bold text-heliora-yellow">
+                LVL {character.level ?? 1}
+              </span>
+            </div>
             <p className="text-heliora-text-dim text-xs">
               {session.player?.username} ∷ {character.type}
             </p>
           </div>
+          {character.progression && !character.progression.atMaxLevel && (
+            <div className="mb-3">
+              <div className="mb-1 flex justify-between text-[11px] font-mono text-heliora-text-dim">
+                <span>XP</span>
+                <span>
+                  {character.progression.xpIntoLevel} / {character.progression.xpForNextLevel}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded bg-heliora-dark border border-heliora-border">
+                <div
+                  className="h-full bg-heliora-yellow transition-all duration-700"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      (character.progression.xpIntoLevel /
+                        Math.max(1, character.progression.xpForNextLevel ?? 1)) *
+                        100,
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2 mb-4 text-sm">
             <div className="bg-heliora-dark rounded p-2 border border-heliora-border">
               <div className="text-heliora-green font-bold font-mono">
@@ -236,17 +294,70 @@ export default function HomePage() {
 
         <Panel title="Stats" accent="cyan">
           <div className="grid grid-cols-4 gap-2">
-            <StatPill label="STR" value={character.strength} />
-            <StatPill label="AGI" value={character.agility} />
-            <StatPill label="INT" value={character.intelligence} />
-            <StatPill label="CHA" value={character.charisma} />
-            <StatPill label="HACK" value={character.hacking} />
-            <StatPill label="CMB" value={character.combat} />
-            <StatPill label="STH" value={character.stealth} />
-            <StatPill label="ENG" value={character.engineering} />
+            {(
+              [
+                ['STR', 'strength', character.strength],
+                ['AGI', 'agility', character.agility],
+                ['INT', 'intelligence', character.intelligence],
+                ['CHA', 'charisma', character.charisma],
+                ['HACK', 'hacking', character.hacking],
+                ['CMB', 'combat', character.combat],
+                ['STH', 'stealth', character.stealth],
+                ['ENG', 'engineering', character.engineering],
+              ] as Array<[string, string, number]>
+            ).map(([label, key, value]) => (
+              <div key={key} className="relative">
+                <StatPill label={label} value={value + (pendingAlloc[key] ?? 0)} />
+                {(character.unspentStatPoints ?? 0) > 0 && (
+                  <button
+                    onClick={() =>
+                      setPendingAlloc((prev) => {
+                        const queued = Object.values(prev).reduce((sum, n) => sum + n, 0);
+                        if (queued >= (character.unspentStatPoints ?? 0)) return prev;
+                        if (value + (prev[key] ?? 0) >= 20) return prev;
+                        return { ...prev, [key]: (prev[key] ?? 0) + 1 };
+                      })
+                    }
+                    className="absolute -right-1 -top-1 h-4 w-4 rounded-full border border-heliora-yellow/60 bg-heliora-yellow/20 text-[10px] font-bold leading-none text-heliora-yellow hover:bg-heliora-yellow/40"
+                    title={`Train ${label}`}
+                  >
+                    +
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
+          {(character.unspentStatPoints ?? 0) > 0 && (
+            <div className="mt-3 rounded border border-heliora-yellow/40 bg-heliora-yellow/10 p-2 text-xs">
+              <div className="mb-2 font-mono font-bold text-heliora-yellow">
+                ⬆{' '}
+                {(character.unspentStatPoints ?? 0) -
+                  Object.values(pendingAlloc).reduce((sum, n) => sum + n, 0)}{' '}
+                stat point(s) available — click + on a stat to queue training
+              </div>
+              {Object.keys(pendingAlloc).length > 0 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void trainStats()}
+                    disabled={training}
+                    className="rounded border border-heliora-yellow/60 bg-heliora-yellow/20 px-3 py-1 font-mono font-bold text-heliora-yellow hover:bg-heliora-yellow/30 disabled:opacity-40"
+                  >
+                    {training ? 'TRAINING…' : 'CONFIRM TRAINING'}
+                  </button>
+                  <button
+                    onClick={() => setPendingAlloc({})}
+                    disabled={training}
+                    className="rounded border border-heliora-border px-3 py-1 font-mono text-heliora-text-dim hover:text-heliora-text disabled:opacity-40"
+                  >
+                    RESET
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="mt-3 text-xs text-heliora-text-dim border-t border-heliora-border pt-2">
-            Stat XP grows from completing matching opportunities (≈50% chance per success).
+            Earn XP from every gig, job, and quest. Level-ups grant stat points, plus stat XP still
+            grows from matching work (≈50% chance per success).
           </div>
         </Panel>
 

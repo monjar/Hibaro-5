@@ -139,3 +139,65 @@ describe('CharactersService travel restrictions', () => {
     expect(prisma.character.update).not.toHaveBeenCalled();
   });
 });
+describe('CharactersService.allocateStatPoints', () => {
+  let prisma: ReturnType<typeof makePrismaMock>;
+  let opportunities: ReturnType<typeof makeOpportunitiesMock>;
+  let service: CharactersService;
+
+  const trainee = {
+    ...baseCharacter,
+    strength: 5,
+    agility: 5,
+    intelligence: 5,
+    charisma: 5,
+    hacking: 5,
+    combat: 5,
+    stealth: 5,
+    engineering: 19,
+    unspentStatPoints: 3,
+  };
+
+  beforeEach(() => {
+    prisma = makePrismaMock();
+    opportunities = makeOpportunitiesMock();
+    service = new CharactersService(prisma as never, opportunities as never);
+  });
+
+  it('applies allocations and decrements the pool', async () => {
+    prisma.character.findUnique.mockResolvedValue(trainee);
+    prisma.character.update.mockResolvedValue({ ...trainee, hacking: 7, unspentStatPoints: 1 });
+
+    await service.allocateStatPoints('char-1', 'player-1', { hacking: 2 });
+
+    expect(prisma.character.update).toHaveBeenCalledWith({
+      where: { id: 'char-1' },
+      data: { hacking: 7, unspentStatPoints: 1 },
+    });
+    expect(prisma.activityLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects allocating more points than available', async () => {
+    prisma.character.findUnique.mockResolvedValue(trainee);
+    await expect(
+      service.allocateStatPoints('char-1', 'player-1', { hacking: 2, combat: 2 }),
+    ).rejects.toThrow(/Not enough stat points/);
+    expect(prisma.character.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects unknown stats and non-positive amounts', async () => {
+    prisma.character.findUnique.mockResolvedValue(trainee);
+    await expect(
+      service.allocateStatPoints('char-1', 'player-1', { credits: 1 }),
+    ).rejects.toThrow(/Unknown stat/);
+    await expect(
+      service.allocateStatPoints('char-1', 'player-1', { hacking: -1 }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('enforces the runtime stat cap', async () => {
+    prisma.character.findUnique.mockResolvedValue(trainee);
+    await expect(
+      service.allocateStatPoints('char-1', 'player-1', { engineering: 2 }),
+    ).rejects.toThrow(/capped at 20/);
+  });
+});

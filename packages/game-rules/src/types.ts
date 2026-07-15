@@ -16,12 +16,14 @@ export interface CharacterStats {
   stealth: number;
   engineering: number;
   reputation: number;
+  level?: number;
 }
 
 export interface Requirement {
   type:
     | 'STAT_MIN'
     | 'STAT_MAX'
+    | 'LEVEL_MIN'
     | 'RELATIONSHIP_MIN'
     | 'RELATIONSHIP_MAX'
     | 'FACTION_REPUTATION_MIN'

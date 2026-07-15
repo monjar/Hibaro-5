@@ -52,6 +52,15 @@ export interface Character {
   stealth: number;
   engineering: number;
   reputation: number;
+  xp: number;
+  level: number;
+  unspentStatPoints: number;
+  progression?: {
+    xpIntoLevel: number;
+    xpForNextLevel: number | null;
+    nextLevelAt: number | null;
+    atMaxLevel: boolean;
+  };
   playerId?: string;
   currentPlanet?: { id: string; name: string; planetType: string };
   currentDistrict?: { id: string; name: string; dangerLevel: number };
@@ -1015,6 +1024,8 @@ export function createApiClient(config?: ApiClientConfig) {
       id: string,
       body: { planetId?: string; districtId?: string; buildingId?: string },
     ) => post<TravelQuote>(`/characters/${id}/travel/quote`, body),
+    allocateStatPoints: (id: string, allocations: Record<string, number>) =>
+      post<Character>(`/characters/${id}/stats/allocate`, { allocations }),
     rest: (id: string) => post<unknown>(`/characters/${id}/rest`),
     stopRest: (id: string) => post<unknown>(`/characters/${id}/rest/stop`),
     useItem: (id: string, itemInstanceId: string) =>

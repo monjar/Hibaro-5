@@ -5,9 +5,23 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { STAT_CAP, xpThresholdForLevel, xpToNextLevel, MAX_LEVEL } from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { assessTravel } from './travel.utils';
 import { OpportunitiesService, REST_OPPORTUNITY_ID } from '../opportunities/opportunities.service';
+
+const ALLOCATABLE_STATS = [
+  'strength',
+  'agility',
+  'intelligence',
+  'charisma',
+  'hacking',
+  'combat',
+  'stealth',
+  'engineering',
+] as const;
+
+type AllocatableStat = (typeof ALLOCATABLE_STATS)[number];
 
 @Injectable()
 export class CharactersService {
@@ -151,13 +165,99 @@ export class CharactersService {
       throw new ForbiddenException('You can only access your own character');
     }
 
+    const progression = this.buildProgressionView(character.xp, character.level);
+
     if (!character.player) {
-      return character;
+      return { ...character, progression };
     }
 
     const safePlayer: Partial<typeof character.player> = { ...character.player };
     delete safePlayer.passwordHash;
-    return { ...character, player: safePlayer as Omit<typeof character.player, 'passwordHash'> };
+    return {
+      ...character,
+      progression,
+      player: safePlayer as Omit<typeof character.player, 'passwordHash'>,
+    };
+  }
+
+  private buildProgressionView(xp: number, level: number) {
+    const currentThreshold = xpThresholdForLevel(level);
+    const nextThreshold = xpThresholdForLevel(level + 1);
+    const atMaxLevel = level >= MAX_LEVEL;
+    return {
+      xpIntoLevel: Math.max(0, xp - currentThreshold),
+      xpForNextLevel: atMaxLevel ? null : xpToNextLevel(level),
+      nextLevelAt: atMaxLevel ? null : nextThreshold,
+      atMaxLevel,
+    };
+  }
+
+  async allocateStatPoints(
+    id: string,
+    playerId: string,
+    allocations: Record<string, number> | undefined,
+  ) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only allocate stats for your own character');
+    }
+
+    if (!allocations || typeof allocations !== 'object' || Array.isArray(allocations)) {
+      throw new BadRequestException('Provide an allocations object, e.g. { "hacking": 2 }');
+    }
+
+    const entries = Object.entries(allocations).filter(([, points]) => points !== 0);
+    if (entries.length === 0) {
+      throw new BadRequestException('No stat points allocated');
+    }
+
+    let totalPoints = 0;
+    const updates: Partial<Record<AllocatableStat, number>> = {};
+    for (const [stat, points] of entries) {
+      if (!ALLOCATABLE_STATS.includes(stat as AllocatableStat)) {
+        throw new BadRequestException(`Unknown stat: ${stat}`);
+      }
+      if (!Number.isInteger(points) || points < 1) {
+        throw new BadRequestException(`Allocation for ${stat} must be a positive integer`);
+      }
+      const currentValue = character[stat as AllocatableStat];
+      if (currentValue + points > STAT_CAP) {
+        throw new BadRequestException(
+          `${stat} is capped at ${STAT_CAP} (current: ${currentValue})`,
+        );
+      }
+      updates[stat as AllocatableStat] = currentValue + points;
+      totalPoints += points;
+    }
+
+    if (totalPoints > character.unspentStatPoints) {
+      throw new BadRequestException(
+        `Not enough stat points: allocating ${totalPoints}, available ${character.unspentStatPoints}`,
+      );
+    }
+
+    const updated = await this.prisma.character.update({
+      where: { id },
+      data: {
+        ...updates,
+        unspentStatPoints: character.unspentStatPoints - totalPoints,
+      },
+    });
+
+    await this.prisma.activityLog.create({
+      data: {
+        playerId,
+        characterId: id,
+        type: 'STAT_TRAINED',
+        message: `${character.name} trained: ${entries
+          .map(([stat, points]) => `${stat} +${points}`)
+          .join(', ')}`,
+        relatedEntities: { allocations },
+      },
+    });
+
+    return updated;
   }
 
   async getSummary(id: string, playerId: string) {

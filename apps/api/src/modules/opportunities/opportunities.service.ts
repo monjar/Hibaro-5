@@ -12,11 +12,13 @@ import {
   Reward as GameRulesReward,
   Risk as GameRulesRisk,
   STAT_CAP,
+  applyXpGain,
   calculateOpportunityEnergyCost,
   calculateOpportunitySuccessChance,
   checkRequirements,
   getOpportunityCheckProfile,
   rollOpportunityCheck,
+  xpRewardForOpportunity,
 } from '@heliora/game-rules';
 import { ActivityType, OpportunityType, RelationshipType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -661,6 +663,23 @@ export class OpportunitiesService {
       }
     }
 
+    const xpGained = xpRewardForOpportunity(
+      { difficulty: definition.difficulty ?? 10, kind: definition.kind },
+      success,
+    );
+    const progression = applyXpGain(
+      { xp: character.xp ?? 0, level: character.level ?? 1 },
+      xpGained,
+    );
+    characterUpdates.xp = progression.xp;
+    if (progression.levelsGained > 0) {
+      characterUpdates.level = progression.level;
+      characterUpdates.unspentStatPoints =
+        (character.unspentStatPoints ?? 0) + progression.statPointsGained;
+      characterUpdates.maxHealth = (character.maxHealth ?? 100) + progression.maxHealthGained;
+      characterUpdates.maxEnergy = (character.maxEnergy ?? 100) + progression.maxEnergyGained;
+    }
+
     if (Object.keys(characterUpdates).length > 0) {
       await this.prisma.character.update({ where: { id: character.id }, data: characterUpdates });
     }
@@ -689,6 +708,13 @@ export class OpportunitiesService {
       checkLabel: checkProfile.label,
       appliedRewards,
       appliedRisks,
+      progression: {
+        xpGained,
+        totalXp: progression.xp,
+        level: progression.level,
+        levelsGained: progression.levelsGained,
+        statPointsGained: progression.statPointsGained,
+      },
       characterLedger: {
         before: {
           credits: character.credits,
@@ -771,6 +797,18 @@ export class OpportunitiesService {
           relatedEntities: { instanceId: instance.id, outcome },
         },
       });
+
+      if (progression.levelsGained > 0) {
+        await this.prisma.activityLog.create({
+          data: {
+            playerId: character.playerId,
+            characterId: character.id,
+            type: 'LEVEL_UP',
+            message: `${character.name} reached level ${progression.level}! +${progression.statPointsGained} stat points`,
+            relatedEntities: { instanceId: instance.id, level: progression.level },
+          },
+        });
+      }
     }
 
     return updatedInstance;
@@ -1308,6 +1346,7 @@ export class OpportunitiesService {
       stealth: Number(character.stealth ?? 0),
       engineering: Number(character.engineering ?? 0),
       reputation: Number(character.reputation ?? 0),
+      level: Number(character.level ?? 1),
     };
   }
 
@@ -1363,6 +1402,8 @@ export class OpportunitiesService {
       }
       case 'CREDITS_MIN':
         return `Requirement not met: credits must be >= ${requirement.value} (current: ${character.credits})`;
+      case 'LEVEL_MIN':
+        return `Requirement not met: level must be >= ${requirement.value} (current: ${character.level ?? 1})`;
       case 'FACTION_REPUTATION_MIN':
       case 'RELATIONSHIP_MIN': {
         const current = requirement.id
