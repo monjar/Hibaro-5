@@ -1,0 +1,21 @@
+# Heliora player web app. Can scale to zero when idle (cold-starts on request).
+app = "heliora-monjar-web"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "apps/web/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"

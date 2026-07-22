@@ -1,0 +1,82 @@
+name: Deploy (Fly.io)
+
+# Deploys the API, player web app, and admin app to Fly.io.
+# Triggers on pushes to master, or manually from the Actions tab.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   FLY_API_TOKEN  - a Fly.io deploy token (fly.io dashboard -> Tokens)
+#   DATABASE_URL   - your Neon Postgres connection string
+#   JWT_SECRET     - any long random string (>= 32 chars)
+#   ADMIN_TOKEN    - any string; gates admin write endpoints
+#
+# App names/region are the env vars below — change them if a name is taken.
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+env:
+  FLY_API_APP: heliora-monjar-api
+  FLY_WEB_APP: heliora-monjar-web
+  FLY_ADMIN_APP: heliora-monjar-admin
+  FLY_ORG: personal
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Create Fly apps if they don't exist
+        run: |
+          for app in "$FLY_API_APP" "$FLY_WEB_APP" "$FLY_ADMIN_APP"; do
+            if flyctl status --app "$app" >/dev/null 2>&1; then
+              echo "App $app already exists."
+            else
+              echo "Creating app $app..."
+              flyctl apps create "$app" --org "$FLY_ORG"
+            fi
+          done
+
+      - name: Stage API secrets
+        run: |
+          flyctl secrets set \
+            DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+            ADMIN_TOKEN="${{ secrets.ADMIN_TOKEN }}" \
+            CORS_ORIGINS="https://${FLY_WEB_APP}.fly.dev,https://${FLY_ADMIN_APP}.fly.dev" \
+            --app "$FLY_API_APP" --stage
+
+      - name: Deploy API
+        run: flyctl deploy . --config fly/api.toml --app "$FLY_API_APP" --remote-only
+
+      - name: Deploy player web app
+        run: >
+          flyctl deploy . --config fly/web.toml --app "$FLY_WEB_APP" --remote-only
+          --build-arg NEXT_PUBLIC_API_URL="https://${FLY_API_APP}.fly.dev"
+
+      - name: Deploy admin app
+        run: >
+          flyctl deploy . --config fly/admin.toml --app "$FLY_ADMIN_APP" --remote-only
+          --build-arg NEXT_PUBLIC_API_URL="https://${FLY_API_APP}.fly.dev"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed 🚀"
+            echo ""
+            echo "- Player app: https://${FLY_WEB_APP}.fly.dev"
+            echo "- Admin app:  https://${FLY_ADMIN_APP}.fly.dev/admin"
+            echo "- API:        https://${FLY_API_APP}.fly.dev/health"
+          } >> "$GITHUB_STEP_SUMMARY"
