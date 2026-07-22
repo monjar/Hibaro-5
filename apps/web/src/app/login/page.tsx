@@ -10,8 +10,8 @@ import { Panel } from '@/components/Panel';
 export default function LoginPage() {
   const router = useRouter();
   const session = useSession();
-  const [identifier, setIdentifier] = useState('test_player');
-  const [password, setPassword] = useState('Heliora123');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -92,10 +92,6 @@ export default function LoginPage() {
             <Link href="/register" className="text-heliora-cyan hover:underline">
               REGISTER A NEW OPERATOR
             </Link>
-          </div>
-          <div className="mt-4 text-center text-[11px] text-heliora-text-dim/70">
-            Default: <span className="text-heliora-cyan">test_player</span> /{' '}
-            <span className="text-heliora-cyan">Heliora123</span>
           </div>
         </Panel>
       </div>

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminGuard } from '../auth/admin.guard';
 import { AuthGuard } from '../auth/auth.guard';
@@ -35,6 +35,34 @@ export class PlayersController {
     @CurrentPlayer() player: AuthenticatedPlayer,
   ) {
     return this.playersService.updateAdminStatus(id, body.isAdmin, player);
+  }
+
+  @Get(':id/daily')
+  @ApiOperation({ summary: 'Daily supply-drop status (streak, next reward)' })
+  getDailyStatus(@Param('id') id: string, @CurrentPlayer() player: AuthenticatedPlayer) {
+    return this.playersService.getDailyStatus(id, player);
+  }
+
+  @Post(':id/daily/claim')
+  @ApiOperation({ summary: 'Claim the daily supply drop' })
+  claimDaily(@Param('id') id: string, @CurrentPlayer() player: AuthenticatedPlayer) {
+    return this.playersService.claimDaily(id, player);
+  }
+
+  @Get(':id/achievements')
+  @ApiOperation({ summary: 'Achievement list with progress and claim state' })
+  getAchievements(@Param('id') id: string, @CurrentPlayer() player: AuthenticatedPlayer) {
+    return this.playersService.getAchievements(id, player);
+  }
+
+  @Post(':id/achievements/:achievementId/claim')
+  @ApiOperation({ summary: 'Claim an unlocked achievement reward' })
+  claimAchievement(
+    @Param('id') id: string,
+    @Param('achievementId') achievementId: string,
+    @CurrentPlayer() player: AuthenticatedPlayer,
+  ) {
+    return this.playersService.claimAchievement(id, achievementId, player);
   }
 
   @Get(':id/activity')

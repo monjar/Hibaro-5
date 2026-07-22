@@ -104,6 +104,20 @@ enum ItemOwnerType {
   FACTION
   CORPORATION
   BUILDING
+  HOUSING
+}
+
+enum CharacterHousingStatus {
+  ACTIVE
+  ENDED
+  EVICTED
+}
+
+enum EquipmentSlot {
+  WEAPON
+  OUTFIT
+  TOOL
+  VEHICLE
 }
 
 enum OpportunityKind {
@@ -198,12 +212,27 @@ enum ActivityType {
   WORLD_EVENT_TRIGGERED
   RELATIONSHIP_CHANGED
   LOCATION_CHANGED
+  LEVEL_UP
+  STAT_TRAINED
+  DECISION_MADE
+  DAILY_CLAIMED
+  ACHIEVEMENT_EARNED
+  HOUSING_RENTED
+  HOUSING_ENDED
+  RENT_PAID
+  ITEM_CRAFTED
 }
 
 enum JobEmploymentStatus {
   ACTIVE
   FIRED
   QUIT
+}
+
+enum PlayerBountyStatus {
+  OPEN
+  CLAIMED
+  CANCELLED
 }
 
 // ==================== MODELS ====================
@@ -217,8 +246,10 @@ model Player {
   createdAt    DateTime @default(now())
   lastLoginAt  DateTime @default(now())
 
-  character    Character?
-  activityLogs ActivityLog[]
+  character          Character?
+  activityLogs       ActivityLog[]
+  dailyClaims        DailyClaim[]
+  achievementRecords AchievementRecord[]
 }
 
 model Character {
@@ -249,6 +280,9 @@ model Character {
   stealth           Int           @default(5)
   engineering       Int           @default(5)
   reputation        Int           @default(0)
+  xp                Int           @default(0)
+  level             Int           @default(1)
+  unspentStatPoints Int           @default(0)
   createdAt         DateTime      @default(now())
 
   factionMemberships     FactionMembership[]
@@ -257,6 +291,12 @@ model Character {
   activityLogs           ActivityLog[]
   stockHoldings          StockHolding[]
   jobEmployments         JobEmployment[]
+  duelsStarted           Duel[]                  @relation("DuelAttacker")
+  duelsDefended          Duel[]                  @relation("DuelDefender")
+  bountiesOnHead         PlayerBounty[]          @relation("BountyTarget")
+  bountiesPosted         PlayerBounty[]          @relation("BountyPoster")
+  bountiesClaimed        PlayerBounty[]          @relation("BountyClaimer")
+  housings               CharacterHousing[]
 }
 
 model SolarSystem {
@@ -318,8 +358,9 @@ model Building {
   gridZ         Float             @default(1.4)
 
   characters          Character[]
-  factionHeadquarters Faction[]     @relation("FactionHQ")
-  corporationHQs      Corporation[] @relation("CorporationHQ")
+  factionHeadquarters Faction[]          @relation("FactionHQ")
+  corporationHQs      Corporation[]      @relation("CorporationHQ")
+  housings            CharacterHousing[]
 }
 
 model Faction {
@@ -429,7 +470,10 @@ model ItemInstance {
   condition        Int            @default(100)
   customName       String?
   modifiers        Json?
+  equippedSlot     EquipmentSlot?
   createdAt        DateTime       @default(now())
+
+  @@index([ownerType, ownerId, equippedSlot])
 }
 
 model OpportunityDefinition {
@@ -534,6 +578,44 @@ model ActivityLog {
   createdAt       DateTime     @default(now())
 }
 
+model Duel {
+  id                 String    @id @default(uuid())
+  attackerId         String
+  attacker           Character @relation("DuelAttacker", fields: [attackerId], references: [id])
+  defenderId         String
+  defender           Character @relation("DuelDefender", fields: [defenderId], references: [id])
+  districtId         String?
+  wagerCredits       Float     @default(0)
+  attackerRoll       Int
+  attackerTotal      Float
+  defenderRoll       Int
+  defenderTotal      Float
+  winnerId           String
+  creditsTransferred Float     @default(0)
+  createdAt          DateTime  @default(now())
+
+  @@index([attackerId, createdAt])
+  @@index([defenderId, createdAt])
+}
+
+model PlayerBounty {
+  id          String             @id @default(uuid())
+  targetId    String
+  target      Character          @relation("BountyTarget", fields: [targetId], references: [id])
+  postedById  String
+  postedBy    Character          @relation("BountyPoster", fields: [postedById], references: [id])
+  amount      Float
+  reason      String?
+  status      PlayerBountyStatus @default(OPEN)
+  claimedById String?
+  claimedBy   Character?         @relation("BountyClaimer", fields: [claimedById], references: [id])
+  claimedAt   DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@index([status, createdAt])
+  @@index([targetId, status])
+}
+
 model StockPriceHistory {
   id            String      @id @default(uuid())
   corporationId String
@@ -544,10 +626,52 @@ model StockPriceHistory {
   @@index([corporationId, recordedAt])
 }
 
+model CharacterHousing {
+  id            String                 @id @default(uuid())
+  characterId   String
+  character     Character              @relation(fields: [characterId], references: [id])
+  buildingId    String
+  building      Building               @relation(fields: [buildingId], references: [id])
+  rentPerDay    Float
+  nextRentDueAt DateTime
+  status        CharacterHousingStatus @default(ACTIVE)
+  totalRentPaid Float                  @default(0)
+  createdAt     DateTime               @default(now())
+  endedAt       DateTime?
+
+  @@index([characterId, status])
+  @@index([status, nextRentDueAt])
+}
+
+model DailyClaim {
+  id             String   @id @default(uuid())
+  playerId       String
+  player         Player   @relation(fields: [playerId], references: [id])
+  streak         Int      @default(1)
+  creditsAwarded Float    @default(0)
+  xpAwarded      Int      @default(0)
+  claimedAt      DateTime @default(now())
+
+  @@index([playerId, claimedAt])
+}
+
+model AchievementRecord {
+  id             String   @id @default(uuid())
+  playerId       String
+  player         Player   @relation(fields: [playerId], references: [id])
+  achievementId  String
+  creditsAwarded Float    @default(0)
+  xpAwarded      Int      @default(0)
+  claimedAt      DateTime @default(now())
+
+  @@unique([playerId, achievementId])
+}
+
 model SimulationTick {
   id          String   @id @default(uuid())
   processedAt DateTime @default(now())
   summary     Json
   results     Json?
+  randomSeed  Float?
   createdAt   DateTime @default(now())
 }

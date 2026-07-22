@@ -25,6 +25,11 @@ export function checkRequirement(
       return character.credits >= requirement.value;
     }
 
+    case 'LEVEL_MIN': {
+      if (requirement.value === undefined) return false;
+      return (character.level ?? 1) >= requirement.value;
+    }
+
     case 'FACTION_REPUTATION_MIN': {
       if (!requirement.id || requirement.value === undefined) return false;
       const rep = context.factionReputations?.[requirement.id] ?? 0;

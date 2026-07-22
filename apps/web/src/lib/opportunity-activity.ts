@@ -1,4 +1,8 @@
-import type { OpportunityInstance, OpportunityTimelineEvent } from '@heliora/platform-sdk';
+import type {
+  OpportunityDecisionRecord,
+  OpportunityInstance,
+  OpportunityTimelineEvent,
+} from '@heliora/platform-sdk';
 
 type RestProgress = {
   buildingId?: string;
@@ -40,6 +44,39 @@ export function isRestActivity(instance: OpportunityInstance) {
 
 export function getAcceptedDescription(instance: OpportunityInstance) {
   return instance.definition.acceptedDescription ?? instance.definition.description ?? null;
+}
+
+export function getDecisions(instance: OpportunityInstance): OpportunityDecisionRecord[] {
+  const progress = asRecord(instance.progress);
+  const decisions = progress?.decisions;
+  return Array.isArray(decisions) ? (decisions as OpportunityDecisionRecord[]) : [];
+}
+
+/** The oldest unanswered decision point whose minute has passed, if any. */
+export function getPendingDecisionEvent(
+  instance: OpportunityInstance,
+  nowMs: number,
+): OpportunityTimelineEvent | null {
+  const events = Array.isArray(instance.definition.timelineEvents)
+    ? (instance.definition.timelineEvents as OpportunityTimelineEvent[])
+    : [];
+  if (events.length === 0) return null;
+
+  const startedAtMs = new Date(instance.startedAt).getTime();
+  const elapsedMinutes = Math.max(0, Math.floor((nowMs - startedAtMs) / 60_000));
+  const answered = new Set(getDecisions(instance).map((decision) => decision.minute));
+
+  const pending = events
+    .filter(
+      (event) =>
+        Array.isArray(event.choices) &&
+        event.choices.length > 0 &&
+        event.minute <= elapsedMinutes &&
+        !answered.has(event.minute),
+    )
+    .sort((left, right) => left.minute - right.minute);
+
+  return pending[0] ?? null;
 }
 
 export function getTimelineEventDescription(instance: OpportunityInstance, nowMs: number) {

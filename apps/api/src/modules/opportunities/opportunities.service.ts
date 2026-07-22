@@ -11,10 +11,25 @@ import {
   RequirementContext,
   Reward as GameRulesReward,
   Risk as GameRulesRisk,
+  DecisionRecord,
+  STAT_CAP,
+  TimelineChoice,
+  aggregateEquipmentBonuses,
+  applyEquipmentBonuses,
+  applyXpGain,
+  calculateOpportunityEnergyCost,
   calculateOpportunitySuccessChance,
   checkRequirements,
+  collectActiveEffects,
+  computeFinalSuccess,
   getOpportunityCheckProfile,
+  resolveChoice,
+  rewardMultiplierFor,
+  riskDeltaFor,
   rollOpportunityCheck,
+  totalDecisionCreditsBonus,
+  totalDecisionRollBonus,
+  xpRewardForOpportunity,
 } from '@heliora/game-rules';
 import { ActivityType, OpportunityType, RelationshipType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -58,6 +73,7 @@ type OpportunityTimelineEvent = {
   description?: string;
   successDescription?: string;
   failureDescription?: string;
+  choices?: TimelineChoice[];
 };
 
 type PlannedOutcome = {
@@ -74,6 +90,8 @@ type PlannedOutcome = {
 type OpportunityProgress = {
   plannedOutcome?: PlannedOutcome;
   rest?: RestProgress;
+  energyCost?: number;
+  decisions?: DecisionRecord[];
 };
 
 type RestProfileInput = {
@@ -287,19 +305,24 @@ export class OpportunitiesService {
     const requirementContext = await this.buildRequirementContext(characterId);
     const completedQuestIds = new Set(requirementContext.completedQuestIds ?? []);
     const unlockSources = this.buildQuestUnlockSources(all);
-    const characterStats = this.toCharacterStats(character);
+    const characterStats = await this.getEffectiveStats(character);
 
-    return all.filter((opp) => {
-      if (this.isHiddenSystemOpportunity(opp)) return false;
-      if (inProgressIds.has(opp.id)) return false;
-      if (this.isOneOffQuestCompleted(opp, completedQuestIds)) return false;
-      if (!this.isQuestUnlocked(opp, completedQuestIds, unlockSources)) return false;
-      return checkRequirements(
-        characterStats,
-        this.readRequirements(opp.requirements),
-        requirementContext,
-      ).passed;
-    });
+    return all
+      .filter((opp) => {
+        if (this.isHiddenSystemOpportunity(opp)) return false;
+        if (inProgressIds.has(opp.id)) return false;
+        if (this.isOneOffQuestCompleted(opp, completedQuestIds)) return false;
+        if (!this.isQuestUnlocked(opp, completedQuestIds, unlockSources)) return false;
+        return checkRequirements(
+          characterStats,
+          this.readRequirements(opp.requirements),
+          requirementContext,
+        ).passed;
+      })
+      .map((opp) => ({
+        ...opp,
+        energyCost: calculateOpportunityEnergyCost({ difficulty: opp.difficulty }),
+      }));
   }
 
   async findInstancesForCharacter(characterId: string, playerId: string) {
@@ -387,12 +410,9 @@ export class OpportunitiesService {
       throw new BadRequestException('Quest is locked until you complete its prerequisite chain');
     }
 
+    const effectiveStats = await this.getEffectiveStats(character);
     const requirements = this.readRequirements(definition.requirements);
-    const requirementResult = checkRequirements(
-      this.toCharacterStats(character),
-      requirements,
-      requirementContext,
-    );
+    const requirementResult = checkRequirements(effectiveStats, requirements, requirementContext);
     if (!requirementResult.passed) {
       throw new BadRequestException(
         this.describeFailedRequirement(
@@ -403,11 +423,23 @@ export class OpportunitiesService {
       );
     }
 
+    const energyCost = calculateOpportunityEnergyCost({ difficulty: definition.difficulty });
+    if ((character.energy ?? 0) < energyCost) {
+      throw new BadRequestException(
+        `Too exhausted for this work: it costs ${energyCost} energy and you have ${character.energy}. Rest at a safehouse, clinic, or hub first.`,
+      );
+    }
+
     const now = new Date();
     const completesAt = definition.durationMinutes
       ? new Date(now.getTime() + definition.durationMinutes * 60 * 1000)
       : new Date(now.getTime() + 60 * 60 * 1000);
-    const plannedOutcome = this.planOutcome(character, definition);
+    const plannedOutcome = this.planOutcome(effectiveStats, definition);
+
+    await this.prisma.character.update({
+      where: { id: characterId },
+      data: { energy: Math.max(0, (character.energy ?? 0) - energyCost) },
+    });
 
     const instance = await this.prisma.opportunityInstance.create({
       data: {
@@ -416,7 +448,7 @@ export class OpportunitiesService {
         status: 'IN_PROGRESS',
         startedAt: now,
         completesAt,
-        progress: { plannedOutcome } as never,
+        progress: { plannedOutcome, energyCost } as never,
       },
       include: { definition: true },
     });
@@ -456,6 +488,119 @@ export class OpportunitiesService {
     return this.resolveInstanceInternal(instance);
   }
 
+  async decideInstance(instanceId: string, playerId: string, minute: number, choiceId: string) {
+    const instance = await this.prisma.opportunityInstance.findUnique({
+      where: { id: instanceId },
+      include: { definition: true, character: true },
+    });
+    if (!instance) throw new NotFoundException(`Instance ${instanceId} not found`);
+    if (instance.character.playerId !== playerId) {
+      throw new ForbiddenException('You can only make decisions on your own activities');
+    }
+    if (instance.status !== 'IN_PROGRESS' && instance.status !== 'ACCEPTED') {
+      throw new BadRequestException('This activity is no longer in progress');
+    }
+    if (this.isRestDefinitionId(instance.definitionId)) {
+      throw new BadRequestException('Rest has no decision points');
+    }
+
+    const timelineEvents = Array.isArray(instance.definition.timelineEvents)
+      ? (instance.definition.timelineEvents as unknown as OpportunityTimelineEvent[])
+      : [];
+    const event = timelineEvents.find(
+      (entry) => entry.minute === minute && Array.isArray(entry.choices) && entry.choices.length,
+    );
+    if (!event) {
+      throw new NotFoundException(`No decision point at minute ${minute}`);
+    }
+
+    const elapsedMinutes = Math.floor(
+      (Date.now() - new Date(instance.startedAt).getTime()) / 60_000,
+    );
+    if (elapsedMinutes < minute) {
+      throw new BadRequestException('This decision point has not come up yet');
+    }
+
+    const progress = this.readProgress(instance.progress) ?? {};
+    const decisions = progress.decisions ?? [];
+    if (decisions.some((decision) => decision.minute === minute)) {
+      throw new BadRequestException('You already made this call');
+    }
+
+    const choice = (event.choices ?? []).find((entry) => entry.id === choiceId);
+    if (!choice) {
+      throw new BadRequestException(`Unknown choice: ${choiceId}`);
+    }
+
+    const character = instance.character;
+    const cost = choice.costCredits ?? 0;
+    if (cost > 0 && character.credits < cost) {
+      throw new BadRequestException(
+        `You need ${cost} credits for that (current: ${Math.floor(character.credits)})`,
+      );
+    }
+
+    const effectiveStats = await this.getEffectiveStats(character);
+    const resolution = resolveChoice(choice, effectiveStats);
+    const effects = resolution.appliedEffects;
+
+    const characterUpdates: Record<string, number> = {};
+    if (cost > 0) {
+      characterUpdates.credits = this.roundCredits(character.credits - cost);
+    }
+    if (effects.wantedDelta) {
+      characterUpdates.wantedLevel = Math.max(0, character.wantedLevel + effects.wantedDelta);
+    }
+    if (effects.healthDelta) {
+      characterUpdates.health = Math.min(
+        character.maxHealth,
+        Math.max(0, character.health + effects.healthDelta),
+      );
+    }
+    if (Object.keys(characterUpdates).length > 0) {
+      await this.prisma.character.update({ where: { id: character.id }, data: characterUpdates });
+    }
+
+    const record: DecisionRecord = {
+      minute,
+      choiceId,
+      checkRoll: resolution.checkRoll,
+      checkTotal: resolution.checkTotal,
+      checkDc: resolution.checkDc,
+      checkPassed: resolution.checkPassed,
+      appliedEffects: effects,
+      decidedAt: new Date().toISOString(),
+    };
+
+    const updatedInstance = await this.prisma.opportunityInstance.update({
+      where: { id: instanceId },
+      data: {
+        progress: { ...progress, decisions: [...decisions, record] } as never,
+      },
+      include: { definition: true },
+    });
+
+    if (character.playerId) {
+      const checkNote =
+        resolution.checkPassed === undefined
+          ? ''
+          : resolution.checkPassed
+            ? ' (check passed)'
+            : ' (check failed)';
+      await this.prisma.activityLog.create({
+        data: {
+          playerId: character.playerId,
+          characterId: character.id,
+          type: 'DECISION_MADE',
+          message: `${character.name} made a call during ${instance.definition.title}: ${choice.label}${checkNote}`,
+          relatedEntities: { instanceId, minute, choiceId, decision: record as never },
+        },
+      });
+    }
+
+    return { instance: updatedInstance, decision: record };
+  }
+
   async resolveInstanceInternal(instance: any) {
     const { definition, character } = instance;
     const now = new Date();
@@ -471,7 +616,7 @@ export class OpportunitiesService {
       delta: number;
     }> = [];
 
-    const rulesCharacter = this.toCharacterStats(character);
+    const rulesCharacter = await this.getEffectiveStats(character);
     const rulesDefinition = this.toGameRulesOpportunity(definition);
     const plannedOutcome = this.readPlannedOutcome(instance.progress);
     const successChance =
@@ -488,25 +633,63 @@ export class OpportunitiesService {
         }
       : rollOpportunityCheck(rulesCharacter, rulesDefinition);
     const checkProfile = getOpportunityCheckProfile(rulesCharacter, rulesDefinition);
-    const success = check.success;
+
+    // Mid-activity decisions can shift the final result either way.
+    const decisions = this.readProgress(instance.progress)?.decisions ?? [];
+    const decisionRollBonus = totalDecisionRollBonus(decisions);
+    const decisionCreditsBonus = totalDecisionCreditsBonus(decisions);
+    const finalCheck = computeFinalSuccess(
+      {
+        roll: check.d20Roll,
+        checkTotal: check.checkTotal,
+        difficultyClass: check.difficultyClass,
+      },
+      decisionRollBonus,
+    );
+    const success = decisionRollBonus !== 0 ? finalCheck.success : check.success;
 
     const rewards = definition.rewards as any[];
     const risks = definition.risks as any[];
     const appliedRewards: any[] = [];
     const appliedRisks: any[] = [];
 
+    // Active world events can scale payouts and shift failure risks for
+    // matching opportunity types at the character's location.
+    const activeWorldEvents = await this.prisma.worldEvent.findMany({
+      where: { status: 'ACTIVE' },
+      select: { scope: true, affectedEntities: true, effects: true },
+    });
+    const locationEffects = collectActiveEffects(activeWorldEvents, {
+      planetId: character.currentPlanetId,
+      districtId: character.currentDistrictId,
+    });
+    const eventRewardMultiplier = rewardMultiplierFor(locationEffects, definition.type);
+    const eventRiskDelta = riskDeltaFor(locationEffects, definition.type);
+
     const characterUpdates: any = {};
+
+    if (success && decisionCreditsBonus > 0) {
+      characterUpdates.credits = this.roundCredits(
+        (character.credits ?? 0) + decisionCreditsBonus,
+      );
+      appliedRewards.push({ type: 'CREDITS', value: decisionCreditsBonus, source: 'DECISION' });
+    }
 
     if (success) {
       for (const reward of rewards) {
         if (reward.type === 'CREDITS') {
           const currentCredits = characterUpdates.credits ?? character.credits ?? 0;
-          characterUpdates.credits = currentCredits + (reward.value ?? 0);
-          appliedRewards.push(reward);
+          const adjustedValue = Math.round((reward.value ?? 0) * eventRewardMultiplier);
+          characterUpdates.credits = currentCredits + adjustedValue;
+          appliedRewards.push(
+            eventRewardMultiplier !== 1
+              ? { ...reward, value: adjustedValue, baseValue: reward.value ?? 0 }
+              : reward,
+          );
         } else if (reward.type === 'STAT_XP') {
           const currentVal = characterUpdates[reward.key] ?? character[reward.key] ?? 0;
-          if (Math.random() < STAT_XP_GAIN_PROBABILITY) {
-            characterUpdates[reward.key] = currentVal + 1;
+          if (Math.random() < STAT_XP_GAIN_PROBABILITY && currentVal < STAT_CAP) {
+            characterUpdates[reward.key] = Math.min(STAT_CAP, currentVal + 1);
           }
           appliedRewards.push(reward);
         } else if (reward.type === 'ITEM' && typeof reward.itemDefinitionId === 'string') {
@@ -569,7 +752,11 @@ export class OpportunitiesService {
     } else {
       for (const risk of risks) {
         const riskRoll = Math.random();
-        if (riskRoll < (risk.probability ?? DEFAULT_RISK_PROBABILITY)) {
+        const riskProbability = Math.min(
+          1,
+          Math.max(0, (risk.probability ?? DEFAULT_RISK_PROBABILITY) + eventRiskDelta),
+        );
+        if (riskRoll < riskProbability) {
           const consequences = risk.consequences || [];
           for (const consequence of consequences) {
             if (consequence.type === 'MODIFY_WANTED_LEVEL') {
@@ -583,10 +770,79 @@ export class OpportunitiesService {
               const currentHealth = characterUpdates.health ?? character.health ?? 100;
               characterUpdates.health = Math.max(0, currentHealth + consequence.value);
               appliedRisks.push(consequence);
+            } else if (consequence.type === 'MODIFY_STAT' && consequence.key === 'energy') {
+              const currentEnergy = characterUpdates.energy ?? character.energy ?? 0;
+              characterUpdates.energy = Math.min(
+                character.maxEnergy ?? 100,
+                Math.max(0, currentEnergy + consequence.value),
+              );
+              appliedRisks.push(consequence);
+            } else if (consequence.type === 'MODIFY_CREDITS') {
+              const currentCredits = characterUpdates.credits ?? character.credits ?? 0;
+              characterUpdates.credits = Math.max(
+                0,
+                this.roundCredits(currentCredits + (consequence.value ?? 0)),
+              );
+              appliedRisks.push(consequence);
+            } else if (
+              consequence.type === 'MODIFY_FACTION_REPUTATION' &&
+              typeof consequence.factionId === 'string'
+            ) {
+              await this.upsertRelationship(
+                'CHARACTER',
+                character.id,
+                'FACTION',
+                consequence.factionId,
+                'REPUTATION',
+                consequence.value ?? 0,
+              );
+              relationshipChanges.push({
+                targetType: 'FACTION',
+                targetId: consequence.factionId,
+                relationshipType: RelationshipType.REPUTATION,
+                delta: consequence.value ?? 0,
+              });
+              appliedRisks.push(consequence);
+            } else if (
+              consequence.type === 'MODIFY_CORPORATION_REPUTATION' &&
+              typeof consequence.corporationId === 'string'
+            ) {
+              await this.upsertRelationship(
+                'CHARACTER',
+                character.id,
+                'CORPORATION',
+                consequence.corporationId,
+                'REPUTATION',
+                consequence.value ?? 0,
+              );
+              relationshipChanges.push({
+                targetType: 'CORPORATION',
+                targetId: consequence.corporationId,
+                relationshipType: RelationshipType.REPUTATION,
+                delta: consequence.value ?? 0,
+              });
+              appliedRisks.push(consequence);
             }
           }
         }
       }
+    }
+
+    const xpGained = xpRewardForOpportunity(
+      { difficulty: definition.difficulty ?? 10, kind: definition.kind },
+      success,
+    );
+    const progression = applyXpGain(
+      { xp: character.xp ?? 0, level: character.level ?? 1 },
+      xpGained,
+    );
+    characterUpdates.xp = progression.xp;
+    if (progression.levelsGained > 0) {
+      characterUpdates.level = progression.level;
+      characterUpdates.unspentStatPoints =
+        (character.unspentStatPoints ?? 0) + progression.statPointsGained;
+      characterUpdates.maxHealth = (character.maxHealth ?? 100) + progression.maxHealthGained;
+      characterUpdates.maxEnergy = (character.maxEnergy ?? 100) + progression.maxEnergyGained;
     }
 
     if (Object.keys(characterUpdates).length > 0) {
@@ -617,6 +873,27 @@ export class OpportunitiesService {
       checkLabel: checkProfile.label,
       appliedRewards,
       appliedRisks,
+      decisionSummary:
+        decisions.length > 0
+          ? {
+              count: decisions.length,
+              rollBonus: decisionRollBonus,
+              creditsBonus: decisionCreditsBonus,
+              adjustedTotal: finalCheck.adjustedTotal,
+              rescued: decisionRollBonus !== 0 && finalCheck.success && !check.success,
+            }
+          : null,
+      worldEventModifiers:
+        eventRewardMultiplier !== 1 || eventRiskDelta !== 0
+          ? { rewardMultiplier: eventRewardMultiplier, riskDelta: eventRiskDelta }
+          : null,
+      progression: {
+        xpGained,
+        totalXp: progression.xp,
+        level: progression.level,
+        levelsGained: progression.levelsGained,
+        statPointsGained: progression.statPointsGained,
+      },
       characterLedger: {
         before: {
           credits: character.credits,
@@ -699,6 +976,18 @@ export class OpportunitiesService {
           relatedEntities: { instanceId: instance.id, outcome },
         },
       });
+
+      if (progression.levelsGained > 0) {
+        await this.prisma.activityLog.create({
+          data: {
+            playerId: character.playerId,
+            characterId: character.id,
+            type: 'LEVEL_UP',
+            message: `${character.name} reached level ${progression.level}! +${progression.statPointsGained} stat points`,
+            relatedEntities: { instanceId: instance.id, level: progression.level },
+          },
+        });
+      }
     }
 
     return updatedInstance;
@@ -1054,8 +1343,7 @@ export class OpportunitiesService {
     return Number(value.toFixed(2));
   }
 
-  private planOutcome(character: any, definition: any): PlannedOutcome {
-    const rulesCharacter = this.toCharacterStats(character);
+  private planOutcome(rulesCharacter: CharacterStats, definition: any): PlannedOutcome {
     const rulesDefinition = this.toGameRulesOpportunity(definition);
     const successChance = calculateOpportunitySuccessChance(rulesCharacter, rulesDefinition);
     const check = rollOpportunityCheck(rulesCharacter, rulesDefinition);
@@ -1134,7 +1422,8 @@ export class OpportunitiesService {
   }
 
   private async buildRequirementContext(characterId: string): Promise<RequirementContext> {
-    const [relationships, completedQuestInstances] = await Promise.all([
+    const [relationships, completedQuestInstances, inventoryItems, locationInfo] =
+      await Promise.all([
       this.prisma.relationship.findMany({
         where: {
           sourceType: 'CHARACTER',
@@ -1150,6 +1439,14 @@ export class OpportunitiesService {
         },
         select: { definitionId: true },
       }),
+      this.prisma.itemInstance.findMany({
+        where: { ownerType: 'CHARACTER', ownerId: characterId },
+        select: { id: true, itemDefinitionId: true },
+      }),
+      this.prisma.character.findUnique({
+        where: { id: characterId },
+        select: { currentPlanetId: true, currentDistrictId: true },
+      }),
     ]);
 
     const factionReputations: Record<string, number> = {};
@@ -1164,10 +1461,23 @@ export class OpportunitiesService {
       }
     }
 
+    // ITEM_REQUIRED requirements may reference either an item definition id
+    // or a specific item instance id, so expose both.
+    const inventoryItemIds = [
+      ...new Set(inventoryItems.flatMap((item) => [item.itemDefinitionId, item.id])),
+    ];
+
     return {
       factionReputations,
       corporationReputations,
       completedQuestIds: completedQuestInstances.map((instance) => instance.definitionId),
+      inventoryItemIds,
+      // PLANET_ACCESS / DISTRICT_ACCESS requirements mean "you must be
+      // there right now" — location-gated content.
+      accessiblePlanetIds: locationInfo?.currentPlanetId ? [locationInfo.currentPlanetId] : [],
+      accessibleDistrictIds: locationInfo?.currentDistrictId
+        ? [locationInfo.currentDistrictId]
+        : [],
     };
   }
 
@@ -1206,6 +1516,25 @@ export class OpportunitiesService {
     return Boolean(questData?.isOneOff && completedQuestIds.has(definition.id));
   }
 
+  /**
+   * Base stats plus bonuses from equipped gear — the numbers every
+   * requirement check and d20 roll should use.
+   */
+  private async getEffectiveStats(character: Record<string, unknown>): Promise<CharacterStats> {
+    const equipped = await this.prisma.itemInstance.findMany({
+      where: {
+        ownerType: 'CHARACTER',
+        ownerId: String(character.id),
+        equippedSlot: { not: null },
+      },
+      include: { itemDefinition: true },
+    });
+    const bonuses = aggregateEquipmentBonuses(
+      equipped.map((item: any) => item.itemDefinition).filter(Boolean),
+    );
+    return applyEquipmentBonuses(this.toCharacterStats(character), bonuses);
+  }
+
   private toCharacterStats(character: Record<string, unknown>): CharacterStats {
     return {
       id: String(character.id),
@@ -1225,6 +1554,7 @@ export class OpportunitiesService {
       stealth: Number(character.stealth ?? 0),
       engineering: Number(character.engineering ?? 0),
       reputation: Number(character.reputation ?? 0),
+      level: Number(character.level ?? 1),
     };
   }
 
@@ -1280,6 +1610,8 @@ export class OpportunitiesService {
       }
       case 'CREDITS_MIN':
         return `Requirement not met: credits must be >= ${requirement.value} (current: ${character.credits})`;
+      case 'LEVEL_MIN':
+        return `Requirement not met: level must be >= ${requirement.value} (current: ${character.level ?? 1})`;
       case 'FACTION_REPUTATION_MIN':
       case 'RELATIONSHIP_MIN': {
         const current = requirement.id
@@ -1307,6 +1639,12 @@ export class OpportunitiesService {
       }
       case 'QUEST_COMPLETED':
         return 'Requirement not met: complete the prerequisite quest chain first';
+      case 'ITEM_REQUIRED':
+        return `Requirement not met: you need ${requirement.name ?? 'a specific item'} in your inventory`;
+      case 'PLANET_ACCESS':
+        return `Requirement not met: you must be on ${requirement.name ?? 'a specific planet'}`;
+      case 'DISTRICT_ACCESS':
+        return `Requirement not met: you must be in ${requirement.name ?? 'a specific district'}`;
       default:
         return `Requirement not met: ${requirement.type}`;
     }

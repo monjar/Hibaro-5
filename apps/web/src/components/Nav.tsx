@@ -12,7 +12,8 @@ const NAV = [
   { href: '/shop', label: 'SHOP', key: '4' },
   { href: '/travel', label: 'TRAVEL', key: '5' },
   { href: '/market', label: 'MARKET', key: '6' },
-  { href: '/activity', label: 'LOGS', key: '7' },
+  { href: '/players', label: 'OPERATORS', key: '7' },
+  { href: '/activity', label: 'LOGS', key: '8' },
 ];
 
 export function Nav() {

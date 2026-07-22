@@ -82,3 +82,24 @@ describe('computeNextStockPrice', () => {
     expect(result.nextPrice).toBeGreaterThanOrEqual(PRICE_FLOOR);
   });
 });
+
+describe('deriveSubSeed', () => {
+  const { deriveSubSeed } = require('../stock-prices');
+
+  it('is deterministic for the same seed and key', () => {
+    expect(deriveSubSeed(0.42, 'corp-a')).toBe(deriveSubSeed(0.42, 'corp-a'));
+  });
+
+  it('differs across keys and seeds', () => {
+    expect(deriveSubSeed(0.42, 'corp-a')).not.toBe(deriveSubSeed(0.42, 'corp-b'));
+    expect(deriveSubSeed(0.42, 'corp-a')).not.toBe(deriveSubSeed(0.43, 'corp-a'));
+  });
+
+  it('stays in [0, 1)', () => {
+    for (const seed of [0, 0.1, 0.99, 123.456]) {
+      const value = deriveSubSeed(seed, 'corp-xyz');
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(1);
+    }
+  });
+});

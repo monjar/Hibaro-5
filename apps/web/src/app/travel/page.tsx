@@ -39,6 +39,7 @@ interface DistrictEntry {
   mapWidth?: number;
   mapHeight?: number;
   mapTiles?: MapTile[];
+  controllingFaction?: { id: string; name: string } | null;
 }
 
 interface PlanetEntry {
@@ -353,6 +354,11 @@ export default function TravelPage() {
                       <span>⚠{d.dangerLevel}</span>
                       <span>⚖{d.lawLevel}</span>
                       <span>💱{d.economyLevel}</span>
+                      {d.controllingFaction?.name && (
+                        <span style={{ color: 'var(--hib-accent, #f0a020)' }}>
+                          ⚑ {d.controllingFaction.name}
+                        </span>
+                      )}
                     </div>
                   </button>
                 ))}

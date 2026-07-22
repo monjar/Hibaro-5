@@ -16,6 +16,7 @@ import {
 } from '@/lib/ui-presenters';
 import {
   getAcceptedDescription,
+  getPendingDecisionEvent,
   getRestProgress,
   getTimelineEventDescription,
   isRestActivity,
@@ -39,6 +40,7 @@ export default function OpportunitiesPage() {
   const [accepting, setAccepting] = useState<string | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
   const [hiringFor, setHiringFor] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const now = useNow();
   const rewardReferenceLookup = useRewardReferenceLookup();
@@ -111,6 +113,25 @@ export default function OpportunitiesPage() {
     } finally {
       setHiringFor(null);
       setTimeout(() => setMessage(''), 4500);
+    }
+  }
+
+  async function decide(instanceId: string, minute: number, choiceId: string) {
+    setDeciding(`${instanceId}:${minute}:${choiceId}`);
+    setMessage('');
+    try {
+      const result = await api.decideOpportunity(instanceId, minute, choiceId);
+      const effects = result.decision.appliedEffects;
+      const bonusNote = effects.rollBonus
+        ? ` (${effects.rollBonus > 0 ? '+' : ''}${effects.rollBonus} to the final check)`
+        : '';
+      setMessage(`✅ ${effects.note ?? 'Call made.'}${bonusNote}`);
+      await refresh();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setDeciding(null);
+      setTimeout(() => setMessage(''), 7000);
     }
   }
 
@@ -238,6 +259,9 @@ export default function OpportunitiesPage() {
       : true;
     const cannotTakeAnotherJob =
       opp.kind === 'JOB' && !employedOpportunityIds.has(opp.id) && activeJobs.length > 0;
+    const tooExhausted = Boolean(
+      character && typeof opp.energyCost === 'number' && character.energy < opp.energyCost,
+    );
     const hoverClass =
       accent === 'cyan'
         ? 'hover:border-heliora-cyan/40'
@@ -275,6 +299,13 @@ export default function OpportunitiesPage() {
         )}
         <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
           <span className="text-heliora-text-dim">⏱ {opp.durationMinutes ?? '?'}m</span>
+          {typeof opp.energyCost === 'number' && (
+            <Tooltip content="Energy spent when you accept this activity. Rest to recover.">
+              <span className={tooExhausted ? 'font-bold text-heliora-red' : 'text-heliora-text-dim'}>
+                ⚡ -{opp.energyCost}
+              </span>
+            </Tooltip>
+          )}
           {(opp.rewards as RewardEntry[]).map((reward, index) => {
             if (reward.type === 'CREDITS') {
               return (
@@ -400,8 +431,14 @@ export default function OpportunitiesPage() {
         ) : (
           <button
             onClick={() => void accept(opp)}
-            disabled={accepting === opp.id || !requirementsMet || hasActiveActivity}
-            title={hasActiveActivity ? 'Finish your current activity first' : undefined}
+            disabled={accepting === opp.id || !requirementsMet || hasActiveActivity || tooExhausted}
+            title={
+              hasActiveActivity
+                ? 'Finish your current activity first'
+                : tooExhausted
+                  ? `You need ${opp.energyCost} energy — rest at a safehouse, clinic, or hub first`
+                  : undefined
+            }
             className={`w-full rounded border px-3 py-1.5 text-xs font-mono font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
               accent === 'cyan'
                 ? 'border-heliora-cyan/50 bg-heliora-cyan/20 text-heliora-cyan hover:bg-heliora-cyan/30'
@@ -416,9 +453,11 @@ export default function OpportunitiesPage() {
                 ? 'LOCKED'
                 : hasActiveActivity
                   ? 'BUSY'
-                  : opp.kind === 'JOB'
-                    ? 'WORK SHIFT'
-                    : 'ACCEPT'}
+                  : tooExhausted
+                    ? 'EXHAUSTED'
+                    : opp.kind === 'JOB'
+                      ? 'WORK SHIFT'
+                      : 'ACCEPT'}
           </button>
         )}
       </div>
@@ -462,6 +501,7 @@ export default function OpportunitiesPage() {
               const rest = getRestProgress(inst);
               const acceptedDescription = getAcceptedDescription(inst);
               const timelineEvent = getTimelineEventDescription(inst, now);
+              const pendingDecision = isRest ? null : getPendingDecisionEvent(inst, now);
               const remaining = Math.max(
                 0,
                 Math.floor((completesAtMs - now) / 1000),
@@ -528,6 +568,44 @@ export default function OpportunitiesPage() {
                         Live update
                       </span>
                       {timelineEvent}
+                    </div>
+                  )}
+                  {pendingDecision && (
+                    <div className="mt-2 rounded border border-heliora-yellow/50 bg-heliora-yellow/10 px-3 py-2">
+                      <div className="mb-1 text-xs font-mono font-bold uppercase tracking-wider text-heliora-yellow">
+                        ⚠ Decision needed
+                      </div>
+                      {pendingDecision.description && (
+                        <p className="mb-2 text-xs text-heliora-text">{pendingDecision.description}</p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {(pendingDecision.choices ?? []).map((choice) => {
+                          const busyKey = `${inst.id}:${pendingDecision.minute}:${choice.id}`;
+                          const unaffordable =
+                            (choice.costCredits ?? 0) > (character?.credits ?? 0);
+                          return (
+                            <button
+                              key={choice.id}
+                              onClick={() => void decide(inst.id, pendingDecision.minute, choice.id)}
+                              disabled={deciding !== null || unaffordable}
+                              title={
+                                unaffordable
+                                  ? `Needs $${choice.costCredits}`
+                                  : choice.statCheck
+                                    ? `${choice.statCheck.stat} check vs DC ${choice.statCheck.dc}`
+                                    : undefined
+                              }
+                              className="rounded border border-heliora-yellow/60 bg-heliora-dark px-3 py-1 text-xs font-mono text-heliora-yellow transition-colors hover:bg-heliora-yellow/20 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {deciding === busyKey ? '…' : choice.label}
+                              {choice.costCredits ? ` ($${choice.costCredits})` : ''}
+                              {choice.statCheck
+                                ? ` [${choice.statCheck.stat.slice(0, 3).toUpperCase()} DC ${choice.statCheck.dc}]`
+                                : ''}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                   {isRest && rest && (

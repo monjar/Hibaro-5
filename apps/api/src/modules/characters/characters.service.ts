@@ -5,9 +5,33 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  MAX_LEVEL,
+  STAT_CAP,
+  aggregateEquipmentBonuses,
+  calculateDailyRent,
+  collectActiveEffects,
+  dangerDeltaFor,
+  slotForCategory,
+  xpThresholdForLevel,
+  xpToNextLevel,
+} from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { assessTravel } from './travel.utils';
 import { OpportunitiesService, REST_OPPORTUNITY_ID } from '../opportunities/opportunities.service';
+
+const ALLOCATABLE_STATS = [
+  'strength',
+  'agility',
+  'intelligence',
+  'charisma',
+  'hacking',
+  'combat',
+  'stealth',
+  'engineering',
+] as const;
+
+type AllocatableStat = (typeof ALLOCATABLE_STATS)[number];
 
 @Injectable()
 export class CharactersService {
@@ -15,6 +39,16 @@ export class CharactersService {
     private prisma: PrismaService,
     private opportunitiesService: OpportunitiesService,
   ) {}
+
+  /** Extra danger at the destination from active world events (e.g. gang tension). */
+  private async getEventDangerDelta(planetId: string, districtId: string): Promise<number> {
+    const activeEvents = await this.prisma.worldEvent.findMany({
+      where: { status: 'ACTIVE' },
+      select: { scope: true, affectedEntities: true, effects: true },
+    });
+    const effects = collectActiveEffects(activeEvents, { planetId, districtId });
+    return dangerDeltaFor(effects, districtId);
+  }
 
   private async getActiveTravelBlock(characterId: string) {
     const activeOpportunity = await this.prisma.opportunityInstance.findFirst({
@@ -151,13 +185,407 @@ export class CharactersService {
       throw new ForbiddenException('You can only access your own character');
     }
 
+    const progression = this.buildProgressionView(character.xp, character.level);
+    const equipment = await this.buildEquipmentView(character.id);
+
     if (!character.player) {
-      return character;
+      return { ...character, progression, equipment };
     }
 
     const safePlayer: Partial<typeof character.player> = { ...character.player };
     delete safePlayer.passwordHash;
-    return { ...character, player: safePlayer as Omit<typeof character.player, 'passwordHash'> };
+    return {
+      ...character,
+      progression,
+      equipment,
+      player: safePlayer as Omit<typeof character.player, 'passwordHash'>,
+    };
+  }
+
+  private async buildEquipmentView(characterId: string) {
+    const equipped = await this.prisma.itemInstance.findMany({
+      where: { ownerType: 'CHARACTER', ownerId: characterId, equippedSlot: { not: null } },
+      include: { itemDefinition: true },
+    });
+    return {
+      items: equipped.map((item) => ({
+        itemInstanceId: item.id,
+        slot: item.equippedSlot,
+        name: item.itemDefinition.name,
+        category: item.itemDefinition.category,
+        rarity: item.itemDefinition.rarity,
+      })),
+      bonuses: aggregateEquipmentBonuses(equipped.map((item) => item.itemDefinition)),
+    };
+  }
+
+  private async findActiveHousing(characterId: string) {
+    return this.prisma.characterHousing.findFirst({
+      where: { characterId, status: 'ACTIVE' },
+      include: {
+        building: {
+          include: { district: { include: { planet: { select: { id: true, name: true } } } } },
+        },
+      },
+    });
+  }
+
+  async getHousing(id: string, playerId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only access your own housing');
+    }
+
+    const housing = await this.findActiveHousing(id);
+    if (!housing) {
+      const rentableHere =
+        character.currentBuildingId != null
+          ? await this.prisma.building.findFirst({
+              where: { id: character.currentBuildingId, status: 'OPEN' },
+              include: { district: true },
+            })
+          : null;
+      const functionality = Array.isArray(rentableHere?.functionality)
+        ? (rentableHere?.functionality as string[])
+        : [];
+      const canRentHere = Boolean(rentableHere && functionality.includes('SAFEHOUSE'));
+      return {
+        housing: null,
+        storedItems: [],
+        canRentHere,
+        rentQuote:
+          canRentHere && rentableHere
+            ? {
+                buildingId: rentableHere.id,
+                buildingName: rentableHere.name,
+                rentPerDay: calculateDailyRent(rentableHere.district),
+              }
+            : null,
+      };
+    }
+
+    const storedItems = await this.prisma.itemInstance.findMany({
+      where: { ownerType: 'HOUSING', ownerId: housing.id },
+      include: { itemDefinition: true },
+    });
+
+    return {
+      housing,
+      storedItems,
+      canRentHere: false,
+      rentQuote: null,
+      atHousingBuilding: character.currentBuildingId === housing.buildingId,
+    };
+  }
+
+  async rentHousing(id: string, playerId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only rent housing for your own character');
+    }
+
+    const existing = await this.findActiveHousing(id);
+    if (existing) {
+      throw new BadRequestException(
+        `You already rent ${existing.building.name}. Cancel it before renting elsewhere.`,
+      );
+    }
+
+    if (!character.currentBuildingId) {
+      throw new BadRequestException('You must be inside a safehouse to rent it');
+    }
+    const building = await this.prisma.building.findUnique({
+      where: { id: character.currentBuildingId },
+      include: { district: true },
+    });
+    const functionality = Array.isArray(building?.functionality)
+      ? (building?.functionality as string[])
+      : [];
+    if (!building || building.status !== 'OPEN' || !functionality.includes('SAFEHOUSE')) {
+      throw new BadRequestException('You can only rent an open safehouse you are standing in');
+    }
+
+    const rentPerDay = calculateDailyRent(building.district);
+    if (character.credits < rentPerDay) {
+      throw new BadRequestException(
+        `First day's rent is ${rentPerDay} credits (you have ${Math.floor(character.credits)})`,
+      );
+    }
+
+    const nextRentDueAt = new Date(Date.now() + 24 * 3_600_000);
+    const [housing] = await this.prisma.$transaction([
+      this.prisma.characterHousing.create({
+        data: {
+          characterId: id,
+          buildingId: building.id,
+          rentPerDay,
+          nextRentDueAt,
+          totalRentPaid: rentPerDay,
+        },
+        include: { building: true },
+      }),
+      this.prisma.character.update({
+        where: { id },
+        data: { credits: Number((character.credits - rentPerDay).toFixed(2)) },
+      }),
+      this.prisma.activityLog.create({
+        data: {
+          playerId,
+          characterId: id,
+          type: 'HOUSING_RENTED',
+          message: `${character.name} rented ${building.name} for ${rentPerDay}/day`,
+          relatedEntities: { buildingId: building.id, rentPerDay },
+        },
+      }),
+    ]);
+
+    return housing;
+  }
+
+  async cancelHousing(id: string, playerId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only cancel your own housing');
+    }
+
+    const housing = await this.findActiveHousing(id);
+    if (!housing) throw new BadRequestException('You are not renting anywhere');
+
+    const [returned] = await this.prisma.$transaction([
+      this.prisma.itemInstance.updateMany({
+        where: { ownerType: 'HOUSING', ownerId: housing.id },
+        data: { ownerType: 'CHARACTER', ownerId: id },
+      }),
+      this.prisma.characterHousing.update({
+        where: { id: housing.id },
+        data: { status: 'ENDED', endedAt: new Date() },
+      }),
+      this.prisma.activityLog.create({
+        data: {
+          playerId,
+          characterId: id,
+          type: 'HOUSING_ENDED',
+          message: `${character.name} gave up the lease on ${housing.building.name}`,
+          relatedEntities: { buildingId: housing.buildingId },
+        },
+      }),
+    ]);
+
+    return { ended: true, itemsReturned: returned.count };
+  }
+
+  async storeItemInHousing(id: string, playerId: string, itemInstanceId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only manage your own storage');
+    }
+
+    const housing = await this.findActiveHousing(id);
+    if (!housing) throw new BadRequestException('You are not renting anywhere');
+    if (character.currentBuildingId !== housing.buildingId) {
+      throw new BadRequestException(
+        `You must be inside ${housing.building.name} to access your storage`,
+      );
+    }
+
+    const item = await this.prisma.itemInstance.findUnique({
+      where: { id: itemInstanceId },
+      include: { itemDefinition: { select: { name: true } } },
+    });
+    if (!item || item.ownerType !== 'CHARACTER' || item.ownerId !== id) {
+      throw new NotFoundException('Item not found in your inventory');
+    }
+    if (item.equippedSlot) {
+      throw new BadRequestException('Unequip the item before storing it');
+    }
+
+    await this.prisma.itemInstance.update({
+      where: { id: itemInstanceId },
+      data: { ownerType: 'HOUSING', ownerId: housing.id },
+    });
+
+    return { stored: true, itemName: item.itemDefinition.name };
+  }
+
+  async retrieveItemFromHousing(id: string, playerId: string, itemInstanceId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only manage your own storage');
+    }
+
+    const housing = await this.findActiveHousing(id);
+    if (!housing) throw new BadRequestException('You are not renting anywhere');
+    if (character.currentBuildingId !== housing.buildingId) {
+      throw new BadRequestException(
+        `You must be inside ${housing.building.name} to access your storage`,
+      );
+    }
+
+    const item = await this.prisma.itemInstance.findUnique({
+      where: { id: itemInstanceId },
+      include: { itemDefinition: { select: { name: true } } },
+    });
+    if (!item || item.ownerType !== 'HOUSING' || item.ownerId !== housing.id) {
+      throw new NotFoundException('Item not found in your storage');
+    }
+
+    await this.prisma.itemInstance.update({
+      where: { id: itemInstanceId },
+      data: { ownerType: 'CHARACTER', ownerId: id },
+    });
+
+    return { retrieved: true, itemName: item.itemDefinition.name };
+  }
+
+  async equipItem(id: string, playerId: string, itemInstanceId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only equip items on your own character');
+    }
+
+    const item = await this.prisma.itemInstance.findUnique({
+      where: { id: itemInstanceId },
+      include: { itemDefinition: true },
+    });
+    if (!item || item.ownerType !== 'CHARACTER' || item.ownerId !== id) {
+      throw new NotFoundException('Item not found in your inventory');
+    }
+
+    const slot = slotForCategory(item.itemDefinition.category);
+    if (!slot) {
+      throw new BadRequestException(
+        `${item.itemDefinition.name} cannot be equipped (category ${item.itemDefinition.category})`,
+      );
+    }
+    if (item.equippedSlot) {
+      throw new BadRequestException(`${item.itemDefinition.name} is already equipped`);
+    }
+    if (item.condition <= 0) {
+      throw new BadRequestException(`${item.itemDefinition.name} is broken — repair it first`);
+    }
+
+    await this.prisma.$transaction([
+      // swap out whatever occupies the slot
+      this.prisma.itemInstance.updateMany({
+        where: { ownerType: 'CHARACTER', ownerId: id, equippedSlot: slot },
+        data: { equippedSlot: null },
+      }),
+      this.prisma.itemInstance.update({
+        where: { id: itemInstanceId },
+        data: { equippedSlot: slot },
+      }),
+    ]);
+
+    return this.buildEquipmentView(id);
+  }
+
+  async unequipItem(id: string, playerId: string, itemInstanceId: string) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only unequip items on your own character');
+    }
+
+    const item = await this.prisma.itemInstance.findUnique({ where: { id: itemInstanceId } });
+    if (!item || item.ownerType !== 'CHARACTER' || item.ownerId !== id) {
+      throw new NotFoundException('Item not found in your inventory');
+    }
+    if (!item.equippedSlot) {
+      throw new BadRequestException('Item is not equipped');
+    }
+
+    await this.prisma.itemInstance.update({
+      where: { id: itemInstanceId },
+      data: { equippedSlot: null },
+    });
+
+    return this.buildEquipmentView(id);
+  }
+
+  private buildProgressionView(xp: number, level: number) {
+    const currentThreshold = xpThresholdForLevel(level);
+    const nextThreshold = xpThresholdForLevel(level + 1);
+    const atMaxLevel = level >= MAX_LEVEL;
+    return {
+      xpIntoLevel: Math.max(0, xp - currentThreshold),
+      xpForNextLevel: atMaxLevel ? null : xpToNextLevel(level),
+      nextLevelAt: atMaxLevel ? null : nextThreshold,
+      atMaxLevel,
+    };
+  }
+
+  async allocateStatPoints(
+    id: string,
+    playerId: string,
+    allocations: Record<string, number> | undefined,
+  ) {
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) throw new NotFoundException(`Character ${id} not found`);
+    if (character.playerId !== playerId) {
+      throw new ForbiddenException('You can only allocate stats for your own character');
+    }
+
+    if (!allocations || typeof allocations !== 'object' || Array.isArray(allocations)) {
+      throw new BadRequestException('Provide an allocations object, e.g. { "hacking": 2 }');
+    }
+
+    const entries = Object.entries(allocations).filter(([, points]) => points !== 0);
+    if (entries.length === 0) {
+      throw new BadRequestException('No stat points allocated');
+    }
+
+    let totalPoints = 0;
+    const updates: Partial<Record<AllocatableStat, number>> = {};
+    for (const [stat, points] of entries) {
+      if (!ALLOCATABLE_STATS.includes(stat as AllocatableStat)) {
+        throw new BadRequestException(`Unknown stat: ${stat}`);
+      }
+      if (!Number.isInteger(points) || points < 1) {
+        throw new BadRequestException(`Allocation for ${stat} must be a positive integer`);
+      }
+      const currentValue = character[stat as AllocatableStat];
+      if (currentValue + points > STAT_CAP) {
+        throw new BadRequestException(
+          `${stat} is capped at ${STAT_CAP} (current: ${currentValue})`,
+        );
+      }
+      updates[stat as AllocatableStat] = currentValue + points;
+      totalPoints += points;
+    }
+
+    if (totalPoints > character.unspentStatPoints) {
+      throw new BadRequestException(
+        `Not enough stat points: allocating ${totalPoints}, available ${character.unspentStatPoints}`,
+      );
+    }
+
+    const updated = await this.prisma.character.update({
+      where: { id },
+      data: {
+        ...updates,
+        unspentStatPoints: character.unspentStatPoints - totalPoints,
+      },
+    });
+
+    await this.prisma.activityLog.create({
+      data: {
+        playerId,
+        characterId: id,
+        type: 'STAT_TRAINED',
+        message: `${character.name} trained: ${entries
+          .map(([stat, points]) => `${stat} +${points}`)
+          .join(', ')}`,
+        relatedEntities: { allocations },
+      },
+    });
+
+    return updated;
   }
 
   async getSummary(id: string, playerId: string) {
@@ -237,12 +665,21 @@ export class CharactersService {
       throw new BadRequestException('District does not belong to the requested planet');
     }
 
+    const eventDangerDelta = await this.getEventDangerDelta(
+      destinationPlanet.id,
+      destinationDistrict.id,
+    );
+    const effectiveDistrictDanger = Math.max(
+      0,
+      destinationDistrict.dangerLevel + eventDangerDelta,
+    );
+
     const travel = assessTravel({
       samePlanet: character.currentPlanetId === destinationPlanet.id,
       sameDistrict: character.currentDistrictId === destinationDistrict.id,
       destinationPlanetDanger: destinationPlanet.dangerLevel,
       destinationPlanetLaw: destinationPlanet.lawLevel,
-      destinationDistrictDanger: destinationDistrict.dangerLevel,
+      destinationDistrictDanger: effectiveDistrictDanger,
       destinationDistrictLaw: destinationDistrict.lawLevel,
       destinationDistrictEconomy: destinationDistrict.economyLevel,
       currentDistrictDanger: character.currentDistrict?.dangerLevel,
@@ -252,6 +689,13 @@ export class CharactersService {
     const travelCost = travel.travelCost + standing.travelSurcharge;
     const warnings = [
       ...(activeTravelBlock ? [activeTravelBlock.warning] : []),
+      ...(eventDangerDelta !== 0
+        ? [
+            eventDangerDelta > 0
+              ? `⚡ Active world events raise the danger here (+${eventDangerDelta})`
+              : `⚡ Active world events lower the danger here (${eventDangerDelta})`,
+          ]
+        : []),
       ...standing.warnings,
     ];
     const blocked = Boolean(activeTravelBlock) || standing.blocked;
@@ -443,12 +887,20 @@ export class CharactersService {
       }
     }
 
+    const eventDangerDelta = await this.getEventDangerDelta(
+      destinationPlanet.id,
+      destinationDistrict.id,
+    );
+
     const travel = assessTravel({
       samePlanet: character.currentPlanetId === destinationPlanet.id,
       sameDistrict: character.currentDistrictId === destinationDistrict.id,
       destinationPlanetDanger: destinationPlanet.dangerLevel,
       destinationPlanetLaw: destinationPlanet.lawLevel,
-      destinationDistrictDanger: destinationDistrict.dangerLevel,
+      destinationDistrictDanger: Math.max(
+        0,
+        destinationDistrict.dangerLevel + eventDangerDelta,
+      ),
       destinationDistrictLaw: destinationDistrict.lawLevel,
       destinationDistrictEconomy: destinationDistrict.economyLevel,
       currentDistrictDanger: character.currentDistrict?.dangerLevel,

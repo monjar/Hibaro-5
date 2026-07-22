@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { hashPasswordSync } from './password-hash';
+import { seedExpansion } from './seed-expansion';
 
 const prisma = new PrismaClient();
 const TEST_PLAYER_PASSWORD = process.env.SEED_TEST_PLAYER_PASSWORD ?? 'Heliora123';
@@ -562,7 +563,9 @@ async function main() {
   // ==================== ITEM DEFINITIONS ====================
   const rustyPulsePistol = await prisma.itemDefinition.upsert({
     where: { name: 'Rusty Pulse Pistol' },
-    update: {},
+    update: {
+      weaponData: { damage: 8, range: 'SHORT', ammoType: 'PULSE_CELL', statBonuses: { combat: 1 } },
+    },
     create: {
       name: 'Rusty Pulse Pistol',
       description: 'A battered pulse pistol that still fires. Barely.',
@@ -570,13 +573,15 @@ async function main() {
       rarity: 'COMMON',
       baseValue: 45,
       weight: 1.2,
-      weaponData: { damage: 8, range: 'SHORT', ammoType: 'PULSE_CELL' },
+      weaponData: { damage: 8, range: 'SHORT', ammoType: 'PULSE_CELL', statBonuses: { combat: 1 } },
     },
   });
 
   const workerJacket = await prisma.itemDefinition.upsert({
     where: { name: 'Worker Jacket' },
-    update: {},
+    update: {
+      clothingData: { armor: 2, slot: 'TORSO', statBonuses: { strength: 1 } },
+    },
     create: {
       name: 'Worker Jacket',
       description: 'Standard issue industrial jacket. Offers minor protection.',
@@ -584,13 +589,15 @@ async function main() {
       rarity: 'COMMON',
       baseValue: 25,
       weight: 1.5,
-      clothingData: { armor: 2, slot: 'TORSO' },
+      clothingData: { armor: 2, slot: 'TORSO', statBonuses: { strength: 1 } },
     },
   });
 
   const cheapHackingDeck = await prisma.itemDefinition.upsert({
     where: { name: 'Cheap Hacking Deck' },
-    update: {},
+    update: {
+      toolData: { tier: 1, statBonuses: { hacking: 2 } },
+    },
     create: {
       name: 'Cheap Hacking Deck',
       description: 'A basic hacking interface. Clunky but functional.',
@@ -598,7 +605,7 @@ async function main() {
       rarity: 'COMMON',
       baseValue: 80,
       weight: 0.5,
-      toolData: { hackingBonus: 2, tier: 1 },
+      toolData: { tier: 1, statBonuses: { hacking: 2 } },
     },
   });
 
@@ -632,7 +639,9 @@ async function main() {
 
   const smugglerToolkit = await prisma.itemDefinition.upsert({
     where: { name: 'Smuggler Toolkit' },
-    update: {},
+    update: {
+      toolData: { concealmentCapacity: 5, statBonuses: { stealth: 3 } },
+    },
     create: {
       name: 'Smuggler Toolkit',
       description: 'A set of tools for concealing cargo and bypassing customs scans.',
@@ -640,7 +649,7 @@ async function main() {
       rarity: 'UNCOMMON',
       baseValue: 150,
       weight: 2.0,
-      toolData: { stealthBonus: 3, concealmentCapacity: 5 },
+      toolData: { concealmentCapacity: 5, statBonuses: { stealth: 3 } },
     },
   });
 
@@ -1064,15 +1073,48 @@ async function main() {
   // ==================== OPPORTUNITY DEFINITIONS ====================
 
   // GIG 1: Move the Medical Crates
+  const medicalCratesTimeline = [
+    { minute: 2, description: 'A forklift convoy rattles past and forces you to tuck the crates into shadow.' },
+    {
+      minute: 4,
+      description: 'A station security patrol sets up a spot-check between you and the drop point.',
+      choices: [
+        {
+          id: 'bribe',
+          label: 'Grease a palm',
+          costCredits: 40,
+          effects: { rollBonus: 3, note: 'The guard suddenly remembers an urgent coffee break.' },
+        },
+        {
+          id: 'crawlway',
+          label: 'Take the maintenance crawlway',
+          statCheck: { stat: 'stealth', dc: 12 },
+          effects: { rollBonus: 4, note: 'You ghost past the checkpoint unseen.' },
+          failEffects: {
+            rollBonus: -2,
+            wantedDelta: 1,
+            note: 'A maintenance camera catches your silhouette on the way through.',
+          },
+        },
+        {
+          id: 'wait',
+          label: 'Wait them out',
+          effects: { rollBonus: -1, note: 'You lose precious time, but nobody looks at you twice.' },
+        },
+      ],
+    },
+    { minute: 7, successDescription: 'You slip the shipment through a maintenance cutout before the patrol completes its sweep.', failureDescription: 'A patrol pauses at the checkpoint and your route tightens into a risky sprint.' },
+  ];
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-move-medical-crates' },
     update: {
       difficulty: 12,
       acceptedDescription:
         'The crates are already tagged and staged. Keep them moving, keep your head down, and do not let station security connect the cargo to Red Market.',
-      timelineEvents: [
-        { minute: 2, description: 'A forklift convoy rattles past and forces you to tuck the crates into shadow.' },
-        { minute: 7, successDescription: 'You slip the shipment through a maintenance cutout before the patrol completes its sweep.', failureDescription: 'A patrol pauses at the checkpoint and your route tightens into a risky sprint.' },
+      timelineEvents: medicalCratesTimeline,
+      requirements: [
+        { type: 'STAT_MIN', key: 'stealth', value: 5 },
+        { type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' },
       ],
     },
     create: {
@@ -1086,7 +1128,10 @@ async function main() {
       postedByType: 'FACTION',
       postedById: redMarket.id,
       type: 'SMUGGLING',
-      requirements: [{ type: 'STAT_MIN', key: 'stealth', value: 5 }],
+      requirements: [
+        { type: 'STAT_MIN', key: 'stealth', value: 5 },
+        { type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' },
+      ],
       durationMinutes: 10,
       difficulty: 12,
       rewards: [
@@ -1102,24 +1147,57 @@ async function main() {
           consequences: [{ type: 'MODIFY_WANTED_LEVEL', value: 1 }],
         },
       ],
-      timelineEvents: [
-        { minute: 2, description: 'A forklift convoy rattles past and forces you to tuck the crates into shadow.' },
-        { minute: 7, successDescription: 'You slip the shipment through a maintenance cutout before the patrol completes its sweep.', failureDescription: 'A patrol pauses at the checkpoint and your route tightens into a risky sprint.' },
-      ],
+      timelineEvents: medicalCratesTimeline,
       possibleEventIds: [],
     },
   });
 
   // GIG 2: Patch the Furnace Sensors
+  const furnaceSensorsTimeline = [
+    { minute: 3, description: 'The first sensor cluster is coated in soot and throwing phantom readings.' },
+    {
+      minute: 6,
+      description:
+        'Half the sensor rack is fried beyond patching. You can reroute power, buy replacement boards, or improvise.',
+      choices: [
+        {
+          id: 'reroute',
+          label: 'Reroute power through the backup bus',
+          statCheck: { stat: 'engineering', dc: 11 },
+          effects: { rollBonus: 4, note: 'The backup bus takes the load without a flicker.' },
+          failEffects: {
+            rollBonus: -2,
+            healthDelta: -5,
+            note: 'The bus arcs and bites your hand on the way out.',
+          },
+        },
+        {
+          id: 'buy-boards',
+          label: 'Buy replacement boards from a scrap vendor',
+          costCredits: 30,
+          effects: { rollBonus: 3, note: 'Fresh boards click in clean. Money well spent.' },
+        },
+        {
+          id: 'improvise',
+          label: 'Improvise with salvaged parts',
+          statCheck: { stat: 'intelligence', dc: 14 },
+          effects: { rollBonus: 5, note: 'Your jury-rig is ugly, brilliant, and rock solid.' },
+          failEffects: { rollBonus: -3, note: 'The salvage rig drifts out of calibration almost immediately.' },
+        },
+      ],
+    },
+    { minute: 11, successDescription: 'Your patch stabilizes the readouts and the furnace settles into a smooth burn.', failureDescription: 'A loose relay spits sparks and the whole rack shudders under your hands.' },
+  ];
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-patch-furnace-sensors' },
     update: {
       difficulty: 12,
       acceptedDescription:
         'You are stepping into heat, noise, and a maintenance network held together by emergency clamps. Keep the line online and do not trip the refinery failsafes.',
-      timelineEvents: [
-        { minute: 3, description: 'The first sensor cluster is coated in soot and throwing phantom readings.' },
-        { minute: 11, successDescription: 'Your patch stabilizes the readouts and the furnace settles into a smooth burn.', failureDescription: 'A loose relay spits sparks and the whole rack shudders under your hands.' },
+      timelineEvents: furnaceSensorsTimeline,
+      requirements: [
+        { type: 'STAT_MIN', key: 'engineering', value: 5 },
+        { type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' },
       ],
     },
     create: {
@@ -1133,7 +1211,10 @@ async function main() {
       postedByType: 'CORPORATION',
       postedById: helixDynamics.id,
       type: 'REPAIR',
-      requirements: [{ type: 'STAT_MIN', key: 'engineering', value: 5 }],
+      requirements: [
+        { type: 'STAT_MIN', key: 'engineering', value: 5 },
+        { type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' },
+      ],
       durationMinutes: 15,
       difficulty: 12,
       rewards: [
@@ -1149,10 +1230,7 @@ async function main() {
           consequences: [{ type: 'MODIFY_STAT', key: 'health', value: -15 }],
         },
       ],
-      timelineEvents: [
-        { minute: 3, description: 'The first sensor cluster is coated in soot and throwing phantom readings.' },
-        { minute: 11, successDescription: 'Your patch stabilizes the readouts and the furnace settles into a smooth burn.', failureDescription: 'A loose relay spits sparks and the whole rack shudders under your hands.' },
-      ],
+      timelineEvents: furnaceSensorsTimeline,
       possibleEventIds: [],
     },
   });
@@ -1164,6 +1242,7 @@ async function main() {
       difficulty: 10,
       acceptedDescription:
         'Clock in, keep the line fed, and stay ahead of the foreman’s inspection rounds. The refinery pays for output, not excuses.',
+      requirements: [{ type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' }],
       timelineEvents: [
         { minute: 8, description: 'Shift alarms cycle and another cart of raw feedstock slams onto your lane.' },
         { minute: 20, successDescription: 'You settle into a fast rhythm and the crew stops watching you like dead weight.', failureDescription: 'The pace breaks your rhythm and the foreman starts marking missed steps.' },
@@ -1180,7 +1259,7 @@ async function main() {
       postedByType: 'CORPORATION',
       postedById: helixDynamics.id,
       type: 'REPAIR',
-      requirements: [],
+      requirements: [{ type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' }],
       durationMinutes: 30,
       difficulty: 10,
       rewards: [
@@ -1198,16 +1277,42 @@ async function main() {
   });
 
   // JOB 2: Courier Loop
+  const courierLoopTimeline = [
+    {
+      minute: 4,
+      description:
+        'Dispatch pushes a reroute around a clogged freight corridor. How do you play it?',
+      choices: [
+        {
+          id: 'shortcut',
+          label: 'Cut through the scaffold alleys',
+          statCheck: { stat: 'agility', dc: 11 },
+          effects: { rollBonus: 3, note: 'You vault the scaffolds and shave minutes off the loop.' },
+          failEffects: { rollBonus: -2, note: 'A missed jump costs you the parcel padding and your pace.' },
+        },
+        {
+          id: 'toll',
+          label: 'Pay the freight-lane toll',
+          costCredits: 20,
+          effects: { rollBonus: 2, note: 'The toll gate waves you into the fast lane.' },
+        },
+        {
+          id: 'stick',
+          label: 'Stick to the official route',
+          effects: { note: 'Slow and steady. Dispatch tracks you nodding along the whole way.' },
+        },
+      ],
+    },
+    { minute: 14, successDescription: 'You thread the detour cleanly and stay inside the delivery window.', failureDescription: 'A bad handoff burns your margin and the rest of the route goes sideways.' },
+  ];
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-courier-loop' },
     update: {
       difficulty: 10,
       acceptedDescription:
         'The route stack is time-boxed and tightly tracked. Miss a handoff and dispatch will know before you finish cursing.',
-      timelineEvents: [
-        { minute: 4, description: 'Dispatch pushes a reroute around a clogged freight corridor.' },
-        { minute: 14, successDescription: 'You thread the detour cleanly and stay inside the delivery window.', failureDescription: 'A bad handoff burns your margin and the rest of the route goes sideways.' },
-      ],
+      timelineEvents: courierLoopTimeline,
+      requirements: [{ type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' }],
     },
     create: {
       id: 'opp-courier-loop',
@@ -1219,7 +1324,7 @@ async function main() {
       postedByType: 'CORPORATION',
       postedById: pigeonCorp.id,
       type: 'DELIVERY',
-      requirements: [],
+      requirements: [{ type: 'PLANET_ACCESS', id: antrolus.id, name: 'Antrolus' }],
       durationMinutes: 20,
       difficulty: 10,
       rewards: [
@@ -1227,10 +1332,7 @@ async function main() {
         { type: 'CORPORATION_REPUTATION', corporationId: pigeonCorp.id, value: 2 },
       ],
       risks: [],
-      timelineEvents: [
-        { minute: 4, description: 'Dispatch pushes a reroute around a clogged freight corridor.' },
-        { minute: 14, successDescription: 'You thread the detour cleanly and stay inside the delivery window.', failureDescription: 'A bad handoff burns your margin and the rest of the route goes sideways.' },
-      ],
+      timelineEvents: courierLoopTimeline,
       possibleEventIds: [],
       repeatability: { type: 'COOLDOWN', cooldownHours: 4 },
     },
@@ -1326,16 +1428,45 @@ async function main() {
   });
 
   // QUEST 3: Pigeon95 Secret
+  const pigeon95SecretTimeline = [
+    {
+      minute: 12,
+      description:
+        'A manifest cluster vanishes from the terminal and leaves one half-erased route tag behind. Someone is scrubbing the trail right now.',
+      choices: [
+        {
+          id: 'hack',
+          label: 'Hack the terminal before the scrub finishes',
+          statCheck: { stat: 'hacking', dc: 13 },
+          effects: { rollBonus: 5, note: 'You rip the raw manifests out mid-scrub. Everything is here.' },
+          failEffects: {
+            rollBonus: -2,
+            wantedDelta: 1,
+            note: 'The terminal flags your intrusion before you can back out.',
+          },
+        },
+        {
+          id: 'bribe-clerk',
+          label: 'Bribe the logistics clerk',
+          costCredits: 60,
+          effects: { rollBonus: 4, note: 'The clerk hands over a shift log that was never supposed to exist.' },
+        },
+        {
+          id: 'observe',
+          label: 'Watch quietly and take notes',
+          effects: { rollBonus: 1, note: 'You memorize who touches the terminal and when. Patience pays, a little.' },
+        },
+      ],
+    },
+    { minute: 40, successDescription: 'You reconstruct the hidden shipment path before the scrub completes.', failureDescription: 'The scrub finishes first and forces you to work from fragments and rumor.' },
+  ];
   await prisma.opportunityDefinition.upsert({
     where: { id: 'opp-quest-pigeon95-secret' },
     update: {
       difficulty: 14,
       acceptedDescription:
         'Fulfilment Core is running hot and somebody is already cleaning the trail. Move fast enough to catch the lie before it is rewritten behind you.',
-      timelineEvents: [
-        { minute: 12, description: 'A manifest cluster vanishes from the terminal and leaves one half-erased route tag behind.' },
-        { minute: 40, successDescription: 'You reconstruct the hidden shipment path before the scrub completes.', failureDescription: 'The scrub finishes first and forces you to work from fragments and rumor.' },
-      ],
+      timelineEvents: pigeon95SecretTimeline,
     },
     create: {
       id: 'opp-quest-pigeon95-secret',
@@ -1358,10 +1489,7 @@ async function main() {
         { type: 'FACTION_REPUTATION', factionId: coilUnion.id, value: 8 },
       ],
       risks: [],
-      timelineEvents: [
-        { minute: 12, description: 'A manifest cluster vanishes from the terminal and leaves one half-erased route tag behind.' },
-        { minute: 40, successDescription: 'You reconstruct the hidden shipment path before the scrub completes.', failureDescription: 'The scrub finishes first and forces you to work from fragments and rumor.' },
-      ],
+      timelineEvents: pigeon95SecretTimeline,
       possibleEventIds: [],
       questData: {
         chainId: 'chain-antrolus-onboarding',
@@ -1452,6 +1580,28 @@ async function main() {
     },
   });
 
+  // Spawn-only follow-up: no startsAt, so it stays dormant until the
+  // Valerina Signal Leak's SPAWN_EVENT effect activates it.
+  await prisma.worldEvent.upsert({
+    where: { id: 'event-ghost-investigation' },
+    update: {},
+    create: {
+      id: 'event-ghost-investigation',
+      title: 'Ghost Investigation',
+      description:
+        'The Valerina Ghosts are sweeping the mire for the source of the leaked signal. Outsiders are watched closely.',
+      scope: 'DISTRICT',
+      affectedEntities: [{ type: 'DISTRICT', id: blacksiteMire.id }],
+      requirements: [],
+      effects: [
+        { type: 'MODIFY_RISK', target: 'INVESTIGATION', modifier: 0.15 },
+        { type: 'MODIFY_REWARD', target: 'SECURITY', modifier: 0.2 },
+      ],
+      startsAt: null,
+      status: 'SCHEDULED',
+    },
+  });
+
   await prisma.worldEvent.upsert({
     where: { id: 'event-teraluma-market-rally' },
     update: {},
@@ -1471,6 +1621,9 @@ async function main() {
   });
 
   console.log('✅ World events: 5 events seeded');
+
+  // ==================== EXPANSION CONTENT (other planets) ====================
+  await seedExpansion(prisma);
 
   console.log('\n🎮 Heliora seed complete!');
   console.log(`   Player ID: ${testPlayer.id}`);

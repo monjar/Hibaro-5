@@ -1,7 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, RelationshipType } from '@prisma/client';
 import { REALTIME_EVENT_CONTRACTS } from '@heliora/platform-sdk';
-import { computeNextStockPrice } from '@heliora/game-rules';
+import {
+  FACTION_WAR_CONTEST_CHANCE,
+  collectActiveEffects,
+  computeNextStockPrice,
+  deriveSubSeed,
+  economyDeltaFor,
+  evaluateRentCycle,
+  factionPresenceScore,
+  resolveDistrictContest,
+  spawnEventIds,
+} from '@heliora/game-rules';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpportunitiesService, REST_OPPORTUNITY_ID } from '../opportunities/opportunities.service';
 import { JobsService } from '../jobs/jobs.service';
@@ -22,13 +32,17 @@ export class SimulationService {
 
   async tick() {
     const now = new Date();
+    // Stored with the tick so seeded steps (stock pricing) can be replayed.
+    const tickSeed = Math.random();
 
     const opportunityResults = await this.resolveDueOpportunities(now);
     const worldEvents = await this.syncWorldEvents(now);
     const economy = await this.advanceEconomy();
-    const corporations = await this.advanceCorporations();
+    const corporations = await this.advanceCorporations(tickSeed);
+    const factionWars = await this.advanceFactionWars();
     const districtControl = await this.buildDistrictControlState();
     const energyDecay = await this.applyEnergyDecay(now);
+    const housingRent = await this.collectHousingRent(now);
     const npcActivity = await this.processNpcActivity(now);
     const jobShifts = await this.jobsService.processStrikes(now);
 
@@ -60,6 +74,14 @@ export class SimulationService {
         notes: corporations.notes,
       },
       {
+        step: 'faction_wars' as const,
+        processed: factionWars.contested,
+        changes: factionWars.flips.length,
+        notes: factionWars.flips.length
+          ? factionWars.flips.map((flip) => flip.summary)
+          : [`${factionWars.contested} district(s) contested, no control changes`],
+      },
+      {
         step: 'district_control' as const,
         processed: districtControl.length,
         changes: districtControl.filter((district) => district.controlScore !== 50).length,
@@ -72,6 +94,15 @@ export class SimulationService {
         notes: [
           `${energyDecay.changed} character(s) decayed`,
           `${energyDecay.totalEnergyLost} total energy lost`,
+        ],
+      },
+      {
+        step: 'housing_rent' as const,
+        processed: housingRent.processed,
+        changes: housingRent.paid + housingRent.evicted,
+        notes: [
+          `${housingRent.paid} rent payment(s) collected (${housingRent.totalCollected} credits)`,
+          `${housingRent.evicted} eviction(s)`,
         ],
       },
       {
@@ -99,6 +130,7 @@ export class SimulationService {
       { type: 'world-events', activated: worldEvents.activated, resolved: worldEvents.resolved },
       { type: 'economy', updates: economy.updated },
       { type: 'corporations', updates: corporations.updated },
+      { type: 'corporation-pricing', entries: corporations.pricingEntries },
       { type: 'energy-decay', changed: energyDecay.changed, totalEnergyLost: energyDecay.totalEnergyLost },
       ...npcActivity.actions,
     ];
@@ -123,6 +155,7 @@ export class SimulationService {
         processedAt: now,
         summary: summary as Prisma.JsonObject,
         results: results as Prisma.JsonArray,
+        randomSeed: tickSeed,
       },
     });
 
@@ -136,8 +169,154 @@ export class SimulationService {
     for (const action of npcActivity.actions) {
       this.realtimeService.publish('npc.activity.recorded', action);
     }
+    for (const flip of factionWars.flips) {
+      // Surfaces in the dashboard World Feed alongside NPC activity.
+      this.realtimeService.publish('npc.activity.recorded', {
+        action: 'FACTION_CONTROL_FLIP',
+        summary: flip.summary,
+        districtId: flip.districtId,
+        factionId: flip.factionId,
+        createdAt: now.toISOString(),
+      });
+    }
 
     return tickSummary;
+  }
+
+  private async advanceFactionWars() {
+    const [factions, factionBuildings, districts] = await Promise.all([
+      this.prisma.faction.findMany({ select: { id: true, name: true, influence: true } }),
+      this.prisma.building.findMany({
+        where: { ownerType: 'FACTION', ownerId: { not: null } },
+        select: { ownerId: true, districtId: true, district: { select: { planetId: true } } },
+      }),
+      this.prisma.district.findMany({
+        select: { id: true, name: true, planetId: true, controllingFactionId: true },
+      }),
+    ]);
+
+    const totalInfluence = factions.reduce(
+      (sum, faction) => sum + Math.max(0, faction.influence),
+      0,
+    );
+    const factionNames = new Map(factions.map((faction) => [faction.id, faction.name]));
+    const flips: Array<{ districtId: string; factionId: string | null; summary: string }> = [];
+    let contested = 0;
+
+    for (const district of districts) {
+      if (Math.random() >= FACTION_WAR_CONTEST_CHANCE) continue;
+      contested += 1;
+
+      const presences = factions
+        .filter((faction) => faction.influence > 0)
+        .map((faction) => ({
+          factionId: faction.id,
+          score: factionPresenceScore({
+            factionId: faction.id,
+            influenceShare:
+              totalInfluence > 0 ? Math.max(0, faction.influence) / totalInfluence : 0,
+            buildingsInDistrict: factionBuildings.filter(
+              (building) =>
+                building.ownerId === faction.id && building.districtId === district.id,
+            ).length,
+            buildingsOnPlanet: factionBuildings.filter(
+              (building) =>
+                building.ownerId === faction.id &&
+                building.district.planetId === district.planetId,
+            ).length,
+            jitter: Math.random(),
+          }),
+        }));
+
+      const result = resolveDistrictContest(district.controllingFactionId, presences);
+      if (!result.flipped || result.controllingFactionId === district.controllingFactionId) {
+        continue;
+      }
+
+      await this.prisma.district.update({
+        where: { id: district.id },
+        data: { controllingFactionId: result.controllingFactionId },
+      });
+
+      const newFactionName = result.controllingFactionId
+        ? factionNames.get(result.controllingFactionId) ?? 'An unknown faction'
+        : null;
+      const previousName = district.controllingFactionId
+        ? factionNames.get(district.controllingFactionId) ?? 'the previous holders'
+        : null;
+      const summary = previousName
+        ? `⚑ ${newFactionName} wrested control of ${district.name} from ${previousName}`
+        : `⚑ ${newFactionName} claimed control of ${district.name}`;
+
+      await this.prisma.activityLog.create({
+        data: {
+          type: 'WORLD_EVENT_TRIGGERED',
+          message: summary,
+          relatedEntities: {
+            districtId: district.id,
+            factionId: result.controllingFactionId,
+            previousFactionId: district.controllingFactionId,
+            challengerScore: result.challengerScore,
+            incumbentScore: result.incumbentScore,
+          },
+        },
+      });
+
+      flips.push({ districtId: district.id, factionId: result.controllingFactionId, summary });
+    }
+
+    return { contested, flips };
+  }
+
+  /**
+   * Dry-run replay of a historical tick's seeded stock pricing: recompute
+   * every corporation's price move from the stored inputs and seed, and
+   * compare with what the tick actually produced. Nothing is persisted.
+   */
+  async replayTick(tickId: string) {
+    const tick = await this.prisma.simulationTick.findUnique({ where: { id: tickId } });
+    if (!tick) {
+      return { found: false as const, tickId };
+    }
+    if (tick.randomSeed === null || tick.randomSeed === undefined) {
+      return {
+        found: true as const,
+        tickId,
+        replayable: false as const,
+        reason: 'Tick predates seed storage — only ticks recorded after the upgrade can replay',
+      };
+    }
+
+    const results = Array.isArray(tick.results) ? (tick.results as Array<any>) : [];
+    const pricing = results.find((entry) => entry?.type === 'corporation-pricing');
+    const entries: Array<any> = Array.isArray(pricing?.entries) ? pricing.entries : [];
+
+    const replayedEntries = entries.map((entry) => {
+      const move = computeNextStockPrice({
+        currentPrice: Number(entry.inputPrice),
+        volatility: Number(entry.volatility),
+        drift: Number(entry.drift),
+        randomSeed: deriveSubSeed(tick.randomSeed as number, String(entry.corporationId)),
+      });
+      return {
+        corporationId: entry.corporationId,
+        name: entry.name,
+        inputPrice: entry.inputPrice,
+        storedNextPrice: entry.nextPrice,
+        replayedNextPrice: move.nextPrice,
+        matches: move.nextPrice === entry.nextPrice,
+      };
+    });
+
+    return {
+      found: true as const,
+      replayable: true as const,
+      tickId,
+      randomSeed: tick.randomSeed,
+      processedAt: tick.processedAt,
+      deterministic: replayedEntries.every((entry) => entry.matches),
+      entries: replayedEntries,
+    };
   }
 
   async getHistory(limit = 10) {
@@ -328,7 +507,38 @@ export class SimulationService {
       ),
     ]);
 
-    return { activated: scheduledEvents.length, resolved: expiringEvents.length };
+    // SPAWN_EVENT effects: an activating event can trigger follow-up events.
+    // Spawn targets with no startsAt stay dormant until spawned this way.
+    let spawned = 0;
+    for (const event of scheduledEvents) {
+      for (const spawnId of spawnEventIds(event.effects)) {
+        const target = await this.prisma.worldEvent.findUnique({ where: { id: spawnId } });
+        if (!target || target.status !== 'SCHEDULED') continue;
+        await this.prisma.worldEvent.update({
+          where: { id: spawnId },
+          data: {
+            status: 'ACTIVE',
+            startsAt: now,
+            endsAt: target.endsAt ?? new Date(now.getTime() + 24 * 3_600_000),
+            triggeredByType: 'WORLD_EVENT',
+            triggeredById: event.id,
+          },
+        });
+        await this.prisma.activityLog.create({
+          data: {
+            type: 'WORLD_EVENT_TRIGGERED',
+            message: `⚡ ${event.title} triggered a follow-up event: ${target.title}`,
+            relatedEntities: { sourceEventId: event.id, spawnedEventId: spawnId },
+          },
+        });
+        spawned += 1;
+      }
+    }
+
+    return {
+      activated: scheduledEvents.length + spawned,
+      resolved: expiringEvents.length,
+    };
   }
 
   private async advanceEconomy() {
@@ -347,13 +557,20 @@ export class SimulationService {
           event.scope === 'PLANET' ||
           JSON.stringify(event.affectedEntities).includes(planet.id),
       ).length;
+      // Authored MODIFY_ECONOMY effects push the drift with direction, on
+      // top of the generic disruption pressure every active event exerts.
+      const economyBoost = economyDeltaFor(
+        collectActiveEffects(activeEvents, { planetId: planet.id }),
+        planet.id,
+      );
       const nextEconomyLevel = clampWorldMetric(
         Math.round(
           (planet.economyLevel +
             avgDistrictEconomy +
             planet.lawLevel -
             planet.dangerLevel -
-            eventPressure) /
+            eventPressure +
+            economyBoost) /
             2,
         ),
         1,
@@ -376,7 +593,7 @@ export class SimulationService {
     };
   }
 
-  private async advanceCorporations() {
+  private async advanceCorporations(tickSeed?: number) {
     const [corporations, planets, employments, activeEvents] = await Promise.all([
       this.prisma.corporation.findMany(),
       this.prisma.planet.findMany(),
@@ -397,6 +614,7 @@ export class SimulationService {
       : 5;
 
     let updated = 0;
+    const pricingEntries: Array<Record<string, unknown>> = [];
     for (const corporation of corporations) {
       const activeEventPressure = activeEvents.filter(
         (event) =>
@@ -446,8 +664,19 @@ export class SimulationService {
         currentPrice: corporation.stockPrice ?? 40,
         volatility: stockVolatility,
         drift,
+        randomSeed:
+          tickSeed !== undefined ? deriveSubSeed(tickSeed, corporation.id) : undefined,
       });
       const stockPrice = move.nextPrice;
+      pricingEntries.push({
+        corporationId: corporation.id,
+        name: corporation.name,
+        inputPrice: corporation.stockPrice ?? 40,
+        volatility: stockVolatility,
+        // Full precision — replay must reproduce the exact computation.
+        drift,
+        nextPrice: stockPrice,
+      });
 
       const status = deriveCorporationStatus(riskOfBankruptcy, cash, debt);
 
@@ -476,6 +705,7 @@ export class SimulationService {
       processed: corporations.length,
       updated,
       notes: ['Applied price movement rules and bankruptcy pressure'],
+      pricingEntries,
     };
   }
 
@@ -530,13 +760,23 @@ export class SimulationService {
       },
       select: { characterId: true },
     });
-    const restingCharacterIds = restingInstances.map((instance) => instance.characterId);
+    const housedCharacters = await this.prisma.characterHousing.findMany({
+      where: { status: 'ACTIVE' },
+      select: { characterId: true },
+    });
+    const exemptCharacterIds = [
+      ...new Set([
+        ...restingInstances.map((instance) => instance.characterId),
+        // A rented safehouse keeps you rested — no passive energy decay.
+        ...housedCharacters.map((housing) => housing.characterId),
+      ]),
+    ];
     const characters = await this.prisma.character.findMany({
       where: {
         type: 'PLAYER',
         energy: { gt: 0 },
         lastEnergyDecayAt: { lte: threshold },
-        ...(restingCharacterIds.length > 0 ? { id: { notIn: restingCharacterIds } } : {}),
+        ...(exemptCharacterIds.length > 0 ? { id: { notIn: exemptCharacterIds } } : {}),
       },
       select: { id: true, energy: true, maxEnergy: true, lastEnergyDecayAt: true },
     });
@@ -568,7 +808,124 @@ export class SimulationService {
       totalEnergyLost += energyLoss;
     }
 
+    // Keep the decay clock current for housed characters so ending a lease
+    // doesn't retroactively charge the whole housed period.
+    if (housedCharacters.length > 0) {
+      await this.prisma.character.updateMany({
+        where: {
+          id: { in: housedCharacters.map((housing) => housing.characterId) },
+          lastEnergyDecayAt: { lte: threshold },
+        },
+        data: { lastEnergyDecayAt: now },
+      });
+    }
+
     return { processed: characters.length, changed, totalEnergyLost };
+  }
+
+  private async collectHousingRent(now: Date) {
+    const dueHousings = await this.prisma.characterHousing.findMany({
+      where: { status: 'ACTIVE', nextRentDueAt: { lte: now } },
+      include: {
+        character: { select: { id: true, name: true, playerId: true, credits: true, wantedLevel: true } },
+        building: { select: { id: true, name: true } },
+      },
+    });
+
+    let paid = 0;
+    let evicted = 0;
+    let totalCollected = 0;
+
+    for (const housing of dueHousings) {
+      const cycle = evaluateRentCycle(
+        { nextRentDueAt: housing.nextRentDueAt, rentPerDay: housing.rentPerDay },
+        { credits: housing.character.credits, wantedLevel: housing.character.wantedLevel },
+        now,
+      );
+
+      const characterUpdates: Record<string, unknown> = {};
+      if (cycle.periodsPaid > 0) {
+        characterUpdates.credits = cycle.creditsAfter;
+        if (cycle.wantedReduction > 0) {
+          characterUpdates.wantedLevel = Math.max(
+            0,
+            housing.character.wantedLevel - cycle.wantedReduction,
+          );
+        }
+      }
+
+      if (cycle.evicted) {
+        await this.prisma.$transaction([
+          ...(Object.keys(characterUpdates).length > 0
+            ? [
+                this.prisma.character.update({
+                  where: { id: housing.character.id },
+                  data: characterUpdates as never,
+                }),
+              ]
+            : []),
+          // Landlord keeps nothing of yours: stored items go back to the tenant.
+          this.prisma.itemInstance.updateMany({
+            where: { ownerType: 'HOUSING', ownerId: housing.id },
+            data: { ownerType: 'CHARACTER', ownerId: housing.character.id },
+          }),
+          this.prisma.characterHousing.update({
+            where: { id: housing.id },
+            data: {
+              status: 'EVICTED',
+              endedAt: now,
+              nextRentDueAt: cycle.nextRentDueAt,
+              totalRentPaid: housing.totalRentPaid + cycle.totalRent,
+            },
+          }),
+          ...(housing.character.playerId
+            ? [
+                this.prisma.activityLog.create({
+                  data: {
+                    playerId: housing.character.playerId,
+                    characterId: housing.character.id,
+                    type: 'HOUSING_ENDED',
+                    message: `${housing.character.name} was evicted from ${housing.building.name} — rent unpaid`,
+                    relatedEntities: { housingId: housing.id, buildingId: housing.building.id },
+                  },
+                }),
+              ]
+            : []),
+        ]);
+        evicted += 1;
+      } else if (cycle.periodsPaid > 0) {
+        await this.prisma.$transaction([
+          this.prisma.character.update({
+            where: { id: housing.character.id },
+            data: characterUpdates as never,
+          }),
+          this.prisma.characterHousing.update({
+            where: { id: housing.id },
+            data: {
+              nextRentDueAt: cycle.nextRentDueAt,
+              totalRentPaid: housing.totalRentPaid + cycle.totalRent,
+            },
+          }),
+          ...(housing.character.playerId
+            ? [
+                this.prisma.activityLog.create({
+                  data: {
+                    playerId: housing.character.playerId,
+                    characterId: housing.character.id,
+                    type: 'RENT_PAID',
+                    message: `${housing.character.name} paid ${cycle.totalRent} rent for ${housing.building.name}${cycle.wantedReduction > 0 ? ' and laid low (wanted -' + cycle.wantedReduction + ')' : ''}`,
+                    relatedEntities: { housingId: housing.id, rent: cycle.totalRent },
+                  },
+                }),
+              ]
+            : []),
+        ]);
+        paid += 1;
+        totalCollected += cycle.totalRent;
+      }
+    }
+
+    return { processed: dueHousings.length, paid, evicted, totalCollected };
   }
 
   private async processNpcActivity(now: Date) {

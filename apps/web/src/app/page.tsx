@@ -19,6 +19,8 @@ import {
 } from '@/lib/ui-presenters';
 import {
   getAcceptedDescription,
+  getDecisions,
+  getPendingDecisionEvent,
   getRestProgress,
   getTimelineEventDescription,
   isRestActivity,
@@ -26,6 +28,8 @@ import {
 import { useRewardReferenceLookup } from '@/lib/use-reward-reference-lookup';
 import type {
   ActivityLog,
+  DailyStatus,
+  HousingView,
   OpportunityDefinition,
   OpportunityInstance,
   WorldEvent,
@@ -67,6 +71,12 @@ const ACTIVITY_ICONS: Record<string, string> = {
   WORLD_EVENT_TRIGGERED: '⚡',
   RELATIONSHIP_CHANGED: '🤝',
   BUILDING_ENTERED: '🏚️',
+  LEVEL_UP: '⬆️',
+  STAT_TRAINED: '🏋️',
+  DECISION_MADE: '🎲',
+  COMBAT_EVENT: '⚔️',
+  DAILY_CLAIMED: '📦',
+  ACHIEVEMENT_EARNED: '🏆',
 };
 
 export default function HomePage() {
@@ -78,61 +88,206 @@ export default function HomePage() {
   const [availableQuests, setAvailableQuests] = useState<OpportunityDefinition[]>([]);
   const [resolving, setResolving] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [pendingAlloc, setPendingAlloc] = useState<Record<string, number>>({});
+  const [training, setTraining] = useState(false);
+  const [deciding, setDeciding] = useState<string | null>(null);
+  const [daily, setDaily] = useState<DailyStatus | null>(null);
+  const [claimingDaily, setClaimingDaily] = useState(false);
+  const [housing, setHousing] = useState<HousingView | null>(null);
+  const [housingBusy, setHousingBusy] = useState(false);
+  const [worldFeed, setWorldFeed] = useState<
+    Array<{ id: number; icon: string; text: string; at: number }>
+  >([]);
   const now = useNow();
   const rewardReferenceLookup = useRewardReferenceLookup();
 
   const refreshAll = useCallback(async () => {
     if (!session.characterId || !session.player?.id) return;
     try {
-      const [inst, act, events, available] = await Promise.all([
+      const [inst, act, events, available, dailyStatus, housingView] = await Promise.all([
         api.getOpportunityInstances(session.characterId),
         api.getActivity(session.player.id, 1, 12),
         api.getActiveWorldEvents(),
         api.getAvailableOpportunities(session.characterId),
+        api.getDailyStatus(session.player.id),
+        api.getCharacterHousing(session.characterId),
       ]);
       setInstances(inst);
       setActivity(act.logs);
       setWorldEvents(events);
       setAvailableQuests(available.filter((opportunity) => opportunity.kind === 'QUEST'));
+      setDaily(dailyStatus);
+      setHousing(housingView);
       await refresh();
     } catch {
       // soft fail
     }
   }, [refresh, session.characterId, session.player?.id]);
 
-  const handleTick = useCallback(() => {
-    void refreshAll();
-  }, [refreshAll]);
+  const handleStreamEvent = useCallback(
+    (event: { type: string; payload: unknown }) => {
+      if (event.type === 'simulation.tick.completed') {
+        void refreshAll();
+        return;
+      }
+      const payload = (event.payload ?? {}) as Record<string, unknown>;
+      let entry: { icon: string; text: string } | null = null;
+      if (event.type === 'npc.activity.recorded' && typeof payload.summary === 'string') {
+        entry = { icon: '🛰', text: payload.summary };
+      } else if (event.type === 'travel.completed') {
+        const destination = payload.destination as
+          | { districtName?: string; planetName?: string }
+          | undefined;
+        const place = destination?.districtName ?? destination?.planetName;
+        if (place && payload.characterId !== session.characterId) {
+          entry = { icon: '🚀', text: `An operator arrived in ${place}` };
+        }
+      }
+      if (entry) {
+        const stamped = { ...entry, id: Date.now() + Math.random(), at: Date.now() };
+        setWorldFeed((prev) => [stamped, ...prev].slice(0, 10));
+      }
+    },
+    [refreshAll, session.characterId],
+  );
 
   useEffect(() => {
     if (!session.characterId) return;
     void refreshAll();
   }, [refreshAll, session.characterId]);
 
-  useEventStream(['simulation.tick.completed'], handleTick, Boolean(session.characterId));
+  const streamStatus = useEventStream(
+    ['simulation.tick.completed', 'npc.activity.recorded', 'travel.completed'],
+    handleStreamEvent,
+    Boolean(session.characterId),
+  );
 
   async function resolveInstance(instanceId: string) {
     setResolving(instanceId);
     setMessage('');
     try {
       const result = (await api.resolveOpportunity(instanceId)) as {
-        outcome?: { success?: boolean; appliedRewards?: Array<{ type: string; value: number }> };
+        outcome?: {
+          success?: boolean;
+          appliedRewards?: Array<{ type: string; value: number }>;
+          progression?: { xpGained?: number; levelsGained?: number; level?: number };
+        };
         definition?: { title?: string };
       };
       const outcome = result.outcome;
       const credits = outcome?.appliedRewards?.find((r) => r.type === 'CREDITS');
+      const xpNote = outcome?.progression?.xpGained ? ` · +${outcome.progression.xpGained} XP` : '';
+      const levelNote =
+        (outcome?.progression?.levelsGained ?? 0) > 0
+          ? ` · ⬆ LEVEL UP! Now level ${outcome?.progression?.level}`
+          : '';
       if (outcome?.success) {
         setMessage(
-          `✅ ${result.definition?.title ?? 'Job'} succeeded${credits ? ` — +$${credits.value}` : ''}`,
+          `✅ ${result.definition?.title ?? 'Job'} succeeded${credits ? ` — +$${credits.value}` : ''}${xpNote}${levelNote}`,
         );
       } else {
-        setMessage(`❌ ${result.definition?.title ?? 'Job'} failed`);
+        setMessage(`❌ ${result.definition?.title ?? 'Job'} failed${xpNote}${levelNote}`);
       }
       await refreshAll();
     } catch (e) {
       setMessage(`❌ ${formatUiError(e)}`);
     } finally {
       setResolving(null);
+      setTimeout(() => setMessage(''), 5000);
+    }
+  }
+
+  async function housingAction(action: 'rent' | 'cancel' | 'retrieve', itemId?: string) {
+    if (!session.characterId) return;
+    setHousingBusy(true);
+    setMessage('');
+    try {
+      if (action === 'rent') {
+        await api.rentHousing(session.characterId);
+        setMessage('✅ Lease signed — this safehouse is yours. No more passive energy drain.');
+      } else if (action === 'cancel') {
+        const result = await api.cancelHousing(session.characterId);
+        setMessage(
+          `✅ Lease ended${result.itemsReturned > 0 ? ` — ${result.itemsReturned} stored item(s) returned to your pack` : ''}`,
+        );
+      } else if (action === 'retrieve' && itemId) {
+        const result = await api.retrieveHousingItem(session.characterId, itemId);
+        setMessage(`✅ Retrieved ${result.itemName} from storage`);
+      }
+      await refreshAll();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setHousingBusy(false);
+      setTimeout(() => setMessage(''), 6000);
+    }
+  }
+
+  async function claimDaily() {
+    if (!session.player?.id) return;
+    setClaimingDaily(true);
+    setMessage('');
+    try {
+      const result = await api.claimDaily(session.player.id);
+      const levelNote = result.levelUp
+        ? ` · ⬆ LEVEL UP! Now level ${result.levelUp.level}`
+        : '';
+      setMessage(
+        `✅ Supply drop claimed: +$${result.reward.credits}, +${result.reward.xp} XP (streak ${result.streak})${levelNote}`,
+      );
+      await refreshAll();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setClaimingDaily(false);
+      setTimeout(() => setMessage(''), 7000);
+    }
+  }
+
+  async function decide(instanceId: string, minute: number, choiceId: string) {
+    setDeciding(`${instanceId}:${minute}:${choiceId}`);
+    setMessage('');
+    try {
+      const result = await api.decideOpportunity(instanceId, minute, choiceId);
+      const effects = result.decision.appliedEffects;
+      const parts: string[] = [];
+      if (result.decision.checkPassed !== undefined) {
+        parts.push(
+          result.decision.checkPassed
+            ? `check passed (${result.decision.checkRoll} + mod vs DC ${result.decision.checkDc})`
+            : `check failed (${result.decision.checkRoll} + mod vs DC ${result.decision.checkDc})`,
+        );
+      }
+      if (effects.rollBonus) {
+        parts.push(`${effects.rollBonus > 0 ? '+' : ''}${effects.rollBonus} to the final check`);
+      }
+      if (effects.creditsBonus) parts.push(`+$${effects.creditsBonus} bonus on success`);
+      if (effects.wantedDelta) parts.push(`wanted ${effects.wantedDelta > 0 ? '+' : ''}${effects.wantedDelta}`);
+      if (effects.healthDelta) parts.push(`health ${effects.healthDelta > 0 ? '+' : ''}${effects.healthDelta}`);
+      const summary = parts.length ? ` — ${parts.join(', ')}` : '';
+      setMessage(`✅ ${effects.note ?? 'Call made.'}${summary}`);
+      await refreshAll();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setDeciding(null);
+      setTimeout(() => setMessage(''), 8000);
+    }
+  }
+
+  async function trainStats() {
+    if (!session.characterId || Object.keys(pendingAlloc).length === 0) return;
+    setTraining(true);
+    setMessage('');
+    try {
+      await api.allocateStatPoints(session.characterId, pendingAlloc);
+      setPendingAlloc({});
+      setMessage('✅ Training complete');
+      await refresh();
+    } catch (e) {
+      setMessage(`❌ ${formatUiError(e)}`);
+    } finally {
+      setTraining(false);
       setTimeout(() => setMessage(''), 5000);
     }
   }
@@ -190,14 +345,64 @@ export default function HomePage() {
         </div>
       )}
 
+      {daily?.canClaim && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-heliora-green/50 bg-heliora-green/10 p-3">
+          <div className="text-sm font-mono text-heliora-green">
+            📦 Daily supply drop ready — +${daily.nextReward.credits} and +{daily.nextReward.xp} XP
+            {daily.nextStreak > 1 ? ` (streak ${daily.nextStreak})` : ''}
+          </div>
+          <button
+            onClick={() => void claimDaily()}
+            disabled={claimingDaily}
+            className="rounded border border-heliora-green/60 bg-heliora-green/20 px-4 py-1.5 text-xs font-mono font-bold text-heliora-green hover:bg-heliora-green/30 disabled:opacity-50"
+          >
+            {claimingDaily ? 'CLAIMING…' : 'CLAIM'}
+          </button>
+        </div>
+      )}
+      {daily && !daily.canClaim && daily.currentStreak > 0 && (
+        <p className="text-[11px] font-mono text-heliora-text-dim">
+          📦 Daily supply drop claimed · streak {daily.currentStreak} · come back tomorrow (48h
+          grace before the streak resets)
+        </p>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Panel title="Operator" accent="cyan" glow>
           <div className="mb-4">
-            <h2 className="text-heliora-cyan text-2xl font-bold font-mono">{character.name}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-heliora-cyan text-2xl font-bold font-mono">{character.name}</h2>
+              <span className="rounded border border-heliora-yellow/50 bg-heliora-yellow/10 px-1.5 py-0.5 text-xs font-mono font-bold text-heliora-yellow">
+                LVL {character.level ?? 1}
+              </span>
+            </div>
             <p className="text-heliora-text-dim text-xs">
               {session.player?.username} ∷ {character.type}
             </p>
           </div>
+          {character.progression && !character.progression.atMaxLevel && (
+            <div className="mb-3">
+              <div className="mb-1 flex justify-between text-[11px] font-mono text-heliora-text-dim">
+                <span>XP</span>
+                <span>
+                  {character.progression.xpIntoLevel} / {character.progression.xpForNextLevel}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded bg-heliora-dark border border-heliora-border">
+                <div
+                  className="h-full bg-heliora-yellow transition-all duration-700"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      (character.progression.xpIntoLevel /
+                        Math.max(1, character.progression.xpForNextLevel ?? 1)) *
+                        100,
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2 mb-4 text-sm">
             <div className="bg-heliora-dark rounded p-2 border border-heliora-border">
               <div className="text-heliora-green font-bold font-mono">
@@ -236,17 +441,81 @@ export default function HomePage() {
 
         <Panel title="Stats" accent="cyan">
           <div className="grid grid-cols-4 gap-2">
-            <StatPill label="STR" value={character.strength} />
-            <StatPill label="AGI" value={character.agility} />
-            <StatPill label="INT" value={character.intelligence} />
-            <StatPill label="CHA" value={character.charisma} />
-            <StatPill label="HACK" value={character.hacking} />
-            <StatPill label="CMB" value={character.combat} />
-            <StatPill label="STH" value={character.stealth} />
-            <StatPill label="ENG" value={character.engineering} />
+            {(
+              [
+                ['STR', 'strength', character.strength],
+                ['AGI', 'agility', character.agility],
+                ['INT', 'intelligence', character.intelligence],
+                ['CHA', 'charisma', character.charisma],
+                ['HACK', 'hacking', character.hacking],
+                ['CMB', 'combat', character.combat],
+                ['STH', 'stealth', character.stealth],
+                ['ENG', 'engineering', character.engineering],
+              ] as Array<[string, string, number]>
+            ).map(([label, key, value]) => (
+              <div key={key} className="relative">
+                <StatPill label={label} value={value + (pendingAlloc[key] ?? 0)} />
+                {(character.unspentStatPoints ?? 0) > 0 && (
+                  <button
+                    onClick={() =>
+                      setPendingAlloc((prev) => {
+                        const queued = Object.values(prev).reduce((sum, n) => sum + n, 0);
+                        if (queued >= (character.unspentStatPoints ?? 0)) return prev;
+                        if (value + (prev[key] ?? 0) >= 20) return prev;
+                        return { ...prev, [key]: (prev[key] ?? 0) + 1 };
+                      })
+                    }
+                    className="absolute -right-1 -top-1 h-4 w-4 rounded-full border border-heliora-yellow/60 bg-heliora-yellow/20 text-[10px] font-bold leading-none text-heliora-yellow hover:bg-heliora-yellow/40"
+                    title={`Train ${label}`}
+                  >
+                    +
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
+          {(character.unspentStatPoints ?? 0) > 0 && (
+            <div className="mt-3 rounded border border-heliora-yellow/40 bg-heliora-yellow/10 p-2 text-xs">
+              <div className="mb-2 font-mono font-bold text-heliora-yellow">
+                ⬆{' '}
+                {(character.unspentStatPoints ?? 0) -
+                  Object.values(pendingAlloc).reduce((sum, n) => sum + n, 0)}{' '}
+                stat point(s) available — click + on a stat to queue training
+              </div>
+              {Object.keys(pendingAlloc).length > 0 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void trainStats()}
+                    disabled={training}
+                    className="rounded border border-heliora-yellow/60 bg-heliora-yellow/20 px-3 py-1 font-mono font-bold text-heliora-yellow hover:bg-heliora-yellow/30 disabled:opacity-40"
+                  >
+                    {training ? 'TRAINING…' : 'CONFIRM TRAINING'}
+                  </button>
+                  <button
+                    onClick={() => setPendingAlloc({})}
+                    disabled={training}
+                    className="rounded border border-heliora-border px-3 py-1 font-mono text-heliora-text-dim hover:text-heliora-text disabled:opacity-40"
+                  >
+                    RESET
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {character.equipment && Object.keys(character.equipment.bonuses).length > 0 && (
+            <div className="mt-3 rounded border border-heliora-cyan/30 bg-heliora-cyan/5 p-2 text-xs font-mono">
+              <span className="text-heliora-text-dim">⚔ Gear: </span>
+              {Object.entries(character.equipment.bonuses).map(([stat, bonus], index) => (
+                <span key={stat} className="text-heliora-cyan">
+                  {index > 0 && ' · '}
+                  {stat.slice(0, 3).toUpperCase()} +{bonus}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="mt-3 text-xs text-heliora-text-dim border-t border-heliora-border pt-2">
-            Stat XP grows from completing matching opportunities (≈50% chance per success).
+            Earn XP from every gig, job, and quest. Level-ups grant stat points, plus stat XP still
+            grows from matching work (≈50% chance per success). Equipped gear boosts your checks.
           </div>
         </Panel>
 
@@ -302,6 +571,60 @@ export default function HomePage() {
               )}
             />
           </div>
+          {housing?.housing ? (
+            <div className="mt-3 rounded border border-heliora-teal/40 bg-heliora-teal/5 p-2 text-xs">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="font-mono font-bold text-heliora-teal">
+                  🏠 {housing.housing.building?.name ?? 'Your safehouse'}
+                </span>
+                <button
+                  onClick={() => void housingAction('cancel')}
+                  disabled={housingBusy}
+                  className="rounded border border-heliora-border px-2 py-0.5 text-[10px] font-mono text-heliora-text-dim hover:text-heliora-red disabled:opacity-40"
+                >
+                  END LEASE
+                </button>
+              </div>
+              <p className="text-heliora-text-dim">
+                ${housing.housing.rentPerDay}/day · next rent{' '}
+                {formatTimeLeft(housing.housing.nextRentDueAt)} · no passive energy drain while
+                housed · rent day shaves wanted level
+              </p>
+              {housing.storedItems.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-[10px] uppercase tracking-wider text-heliora-text-dim">
+                    Storage ({housing.storedItems.length})
+                  </p>
+                  {housing.storedItems.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between">
+                      <span className="text-heliora-text">{item.itemDefinition.name}</span>
+                      {housing.atHousingBuilding ? (
+                        <button
+                          onClick={() => void housingAction('retrieve', item.id)}
+                          disabled={housingBusy}
+                          className="rounded border border-heliora-teal/50 px-2 py-0.5 text-[10px] font-mono text-heliora-teal hover:bg-heliora-teal/10 disabled:opacity-40"
+                        >
+                          RETRIEVE
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-heliora-text-dim">at safehouse</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : housing?.canRentHere && housing.rentQuote ? (
+            <button
+              onClick={() => void housingAction('rent')}
+              disabled={housingBusy}
+              className="mt-3 w-full rounded border border-heliora-teal/50 bg-heliora-teal/10 px-3 py-1.5 text-xs font-mono font-bold text-heliora-teal hover:bg-heliora-teal/20 disabled:opacity-40"
+            >
+              {housingBusy
+                ? '…'
+                : `🏠 RENT THIS SAFEHOUSE — $${housing.rentQuote.rentPerDay}/day`}
+            </button>
+          ) : null}
         </Panel>
       </div>
 
@@ -387,6 +710,8 @@ export default function HomePage() {
               const rest = getRestProgress(inst);
               const acceptedDescription = getAcceptedDescription(inst);
               const timelineEvent = getTimelineEventDescription(inst, now);
+              const pendingDecision = isRest ? null : getPendingDecisionEvent(inst, now);
+              const madeDecisions = isRest ? [] : getDecisions(inst);
               return (
                 <div
                   key={inst.id}
@@ -418,6 +743,56 @@ export default function HomePage() {
                         </span>
                         {timelineEvent}
                       </div>
+                    )}
+                    {pendingDecision && (
+                      <div className="mt-2 rounded border border-heliora-yellow/50 bg-heliora-yellow/10 px-3 py-2">
+                        <div className="mb-1 text-xs font-mono font-bold uppercase tracking-wider text-heliora-yellow">
+                          ⚠ Decision needed
+                        </div>
+                        {pendingDecision.description && (
+                          <p className="mb-2 text-xs text-heliora-text">
+                            {pendingDecision.description}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {(pendingDecision.choices ?? []).map((choice) => {
+                            const busyKey = `${inst.id}:${pendingDecision.minute}:${choice.id}`;
+                            const unaffordable =
+                              (choice.costCredits ?? 0) > (character?.credits ?? 0);
+                            return (
+                              <button
+                                key={choice.id}
+                                onClick={() =>
+                                  void decide(inst.id, pendingDecision.minute, choice.id)
+                                }
+                                disabled={deciding !== null || unaffordable}
+                                title={
+                                  unaffordable
+                                    ? `Needs $${choice.costCredits}`
+                                    : choice.statCheck
+                                      ? `${choice.statCheck.stat} check vs DC ${choice.statCheck.dc}`
+                                      : undefined
+                                }
+                                className="rounded border border-heliora-yellow/60 bg-heliora-dark px-3 py-1 text-xs font-mono text-heliora-yellow transition-colors hover:bg-heliora-yellow/20 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                {deciding === busyKey ? '…' : choice.label}
+                                {choice.costCredits ? ` ($${choice.costCredits})` : ''}
+                                {choice.statCheck
+                                  ? ` [${choice.statCheck.stat.slice(0, 3).toUpperCase()} DC ${choice.statCheck.dc}]`
+                                  : ''}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {madeDecisions.length > 0 && (
+                      <p className="mt-1 text-[11px] text-heliora-text-dim">
+                        {madeDecisions.length} call{madeDecisions.length === 1 ? '' : 's'} made
+                        {madeDecisions.some((d) => d.appliedEffects?.rollBonus)
+                          ? ` · net ${madeDecisions.reduce((s, d) => s + (d.appliedEffects?.rollBonus ?? 0), 0) >= 0 ? '+' : ''}${madeDecisions.reduce((s, d) => s + (d.appliedEffects?.rollBonus ?? 0), 0)} on the final check`
+                          : ''}
+                      </p>
                     )}
                     {isRest && rest && (
                       <p className="mt-2 text-[11px] text-heliora-text-dim">
@@ -528,6 +903,43 @@ export default function HomePage() {
           </div>
         </Panel>
       )}
+
+      <Panel title="World Feed" accent="cyan">
+        <div className="mb-2 flex items-center gap-2 text-[11px] font-mono text-heliora-text-dim">
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${
+              streamStatus === 'open'
+                ? 'bg-heliora-green'
+                : streamStatus === 'reconnecting'
+                  ? 'bg-heliora-red animate-pulse'
+                  : 'bg-heliora-yellow animate-pulse'
+            }`}
+          />
+          {streamStatus === 'open'
+            ? 'LIVE — the world moves while you watch'
+            : streamStatus === 'reconnecting'
+              ? 'LINK LOST — reconnecting…'
+              : 'CONNECTING…'}
+        </div>
+        {worldFeed.length === 0 ? (
+          <p className="text-xs text-heliora-text-dim">
+            Waiting for signals… NPC crews, rival operators, and market moves show up here in
+            realtime.
+          </p>
+        ) : (
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {worldFeed.map((entry) => (
+              <div key={entry.id} className="flex items-start gap-2 text-xs">
+                <span className="shrink-0">{entry.icon}</span>
+                <span className="flex-1 text-heliora-text">{entry.text}</span>
+                <span className="shrink-0 text-heliora-text-dim">
+                  {formatTimeAgo(new Date(entry.at).toISOString())}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
 
       {activity.length > 0 && (
         <Panel title="Activity Log" accent="yellow">

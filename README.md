@@ -478,6 +478,14 @@ npm run dev
 # Or with Docker (TODO: add worker to docker-compose)
 ```
 
+## Documentation
+
+- **[docs/PROJECT-STATE.md](docs/PROJECT-STATE.md)** — the factual inventory: architecture, every shipped system, content counts, verification state, and known gaps.
+- **[docs/GAME-ASSESSMENT.md](docs/GAME-ASSESSMENT.md)** — the qualitative assessment: how the game plays hour-by-hour, loop and balance analysis, a scorecard, and the launch-readiness verdict.
+- **[PLAN.md](PLAN.md)** — the development plan: future ideas plus detailed shipping notes for every completed feature.
+
+The README below covers setup and the API surface; the feature set has grown well beyond the highlights listed here — PROJECT-STATE.md is the authoritative systems list (progression/levels, equipment, mid-mission decisions, PVP, housing, crafting, faction wars, world-event effects, daily rewards, achievements, and more).
+
 ## Roadmap
 
 See [PLAN.md](PLAN.md) for the full development plan — what's up next, what's in progress, and future ideas — with file-level context for each item.

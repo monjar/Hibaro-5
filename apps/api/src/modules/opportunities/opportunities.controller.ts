@@ -81,6 +81,23 @@ export class OpportunitiesController {
     return this.opportunitiesService.resolveInstance(instanceId, player.sub);
   }
 
+  @Post('instances/:instanceId/decide')
+  @ApiOperation({ summary: 'Answer a mid-activity decision point' })
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard)
+  decide(
+    @Param('instanceId') instanceId: string,
+    @CurrentPlayer() player: AuthenticatedPlayer,
+    @Body() body: { minute: number; choiceId: string },
+  ) {
+    return this.opportunitiesService.decideInstance(
+      instanceId,
+      player.sub,
+      Number(body?.minute),
+      String(body?.choiceId ?? ''),
+    );
+  }
+
   @Patch(':id')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Update an opportunity definition (admin)' })

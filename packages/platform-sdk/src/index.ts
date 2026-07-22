@@ -6,6 +6,9 @@ export type SimulationStepName =
   | 'economy'
   | 'corporations'
   | 'district_control'
+  | 'faction_wars'
+  | 'energy_decay'
+  | 'housing_rent'
   | 'npc_activity'
   | 'job_shifts';
 
@@ -52,6 +55,25 @@ export interface Character {
   stealth: number;
   engineering: number;
   reputation: number;
+  xp: number;
+  level: number;
+  unspentStatPoints: number;
+  progression?: {
+    xpIntoLevel: number;
+    xpForNextLevel: number | null;
+    nextLevelAt: number | null;
+    atMaxLevel: boolean;
+  };
+  equipment?: {
+    items: Array<{
+      itemInstanceId: string;
+      slot: EquipmentSlot;
+      name: string;
+      category: string;
+      rarity: string;
+    }>;
+    bonuses: Record<string, number>;
+  };
   playerId?: string;
   currentPlanet?: { id: string; name: string; planetType: string };
   currentDistrict?: { id: string; name: string; dangerLevel: number };
@@ -69,11 +91,40 @@ export interface Player {
   character?: Character;
 }
 
+export interface OpportunityDecisionEffects {
+  rollBonus?: number;
+  creditsBonus?: number;
+  wantedDelta?: number;
+  healthDelta?: number;
+  note?: string;
+}
+
+export interface OpportunityTimelineChoice {
+  id: string;
+  label: string;
+  costCredits?: number;
+  statCheck?: { stat: string; dc: number };
+  effects?: OpportunityDecisionEffects;
+  failEffects?: OpportunityDecisionEffects;
+}
+
 export interface OpportunityTimelineEvent {
   minute: number;
   description?: string;
   successDescription?: string;
   failureDescription?: string;
+  choices?: OpportunityTimelineChoice[];
+}
+
+export interface OpportunityDecisionRecord {
+  minute: number;
+  choiceId: string;
+  checkRoll?: number;
+  checkTotal?: number;
+  checkDc?: number;
+  checkPassed?: boolean;
+  appliedEffects: OpportunityDecisionEffects;
+  decidedAt: string;
 }
 
 export interface OpportunityDefinition {
@@ -101,6 +152,8 @@ export interface OpportunityDefinition {
   } | null;
   startsAvailableAt?: string | null;
   endsAvailableAt?: string | null;
+  /** Energy deducted on accept; present on /opportunities/available responses. */
+  energyCost?: number;
 }
 
 export interface AdminOpportunityInput {
@@ -539,6 +592,8 @@ export interface ShopListing {
   stock: ShopItem[];
 }
 
+export type EquipmentSlot = 'WEAPON' | 'OUTFIT' | 'TOOL' | 'VEHICLE';
+
 export interface InventoryItem {
   id: string;
   itemDefinitionId: string;
@@ -547,6 +602,7 @@ export interface InventoryItem {
   condition: number;
   customName?: string | null;
   modifiers?: unknown;
+  equippedSlot?: EquipmentSlot | null;
   itemDefinition: {
     id: string;
     name: string;
@@ -726,6 +782,26 @@ export interface SimulationStepSummary {
   notes?: string[];
 }
 
+export interface TickReplayEntry {
+  corporationId: string;
+  name: string;
+  inputPrice: number;
+  storedNextPrice: number;
+  replayedNextPrice: number;
+  matches: boolean;
+}
+
+export interface TickReplayResult {
+  found: boolean;
+  replayable?: boolean;
+  reason?: string;
+  tickId: string;
+  randomSeed?: number;
+  processedAt?: string;
+  deterministic?: boolean;
+  entries?: TickReplayEntry[];
+}
+
 export interface SimulationTickSummary {
   id?: string;
   processedAt: string;
@@ -786,6 +862,172 @@ export const REALTIME_EVENT_CONTRACTS: RealtimeEventContract[] = [
     payloadKeys: ['characterId', 'travelCost', 'travelRiskScore', 'destination'],
   },
 ];
+
+export interface CharacterHousing {
+  id: string;
+  characterId: string;
+  buildingId: string;
+  rentPerDay: number;
+  nextRentDueAt: string;
+  status: 'ACTIVE' | 'ENDED' | 'EVICTED';
+  totalRentPaid: number;
+  createdAt: string;
+  building?: {
+    id: string;
+    name: string;
+    district?: { id: string; name: string; planet?: { id: string; name: string } };
+  };
+}
+
+export interface HousingView {
+  housing: CharacterHousing | null;
+  storedItems: InventoryItem[];
+  canRentHere: boolean;
+  rentQuote: { buildingId: string; buildingName: string; rentPerDay: number } | null;
+  atHousingBuilding?: boolean;
+}
+
+export interface DailyStatus {
+  canClaim: boolean;
+  currentStreak: number;
+  nextStreak: number;
+  nextReward: { credits: number; xp: number };
+  lastClaimAt: string | null;
+}
+
+export interface DailyClaimResult {
+  claim: { id: string; streak: number; creditsAwarded: number; xpAwarded: number };
+  reward: { credits: number; xp: number };
+  streak: number;
+  levelUp: { level: number; statPointsGained: number } | null;
+}
+
+export interface AchievementView {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  target: number;
+  progress: number;
+  unlocked: boolean;
+  claimed: boolean;
+  rewardCredits: number;
+  rewardXp: number;
+}
+
+export interface AchievementClaimResult {
+  record: { id: string; achievementId: string };
+  reward: { credits: number; xp: number };
+  levelUp: { level: number; statPointsGained: number } | null;
+}
+
+export interface CraftingRecipeView {
+  id: string;
+  name: string;
+  description: string;
+  output: { itemName: string; quantity: number };
+  inputs: Array<{ itemName: string; quantity: number }>;
+  creditsCost: number;
+  energyCost: number;
+  statRequirement: { key: string; min: number };
+  xpReward: number;
+  canCraft: boolean;
+  reasons: string[];
+}
+
+export interface CraftingRecipesView {
+  atWorkshop: boolean;
+  recipes: CraftingRecipeView[];
+}
+
+export interface CraftResult {
+  crafted: string;
+  quantity: number;
+  xpGained: number;
+  levelUp: { level: number; statPointsGained: number } | null;
+}
+
+export interface NearbyPlayer {
+  id: string;
+  name: string;
+  level: number;
+  wantedLevel: number;
+  pvpProtected: boolean;
+}
+
+export interface PvpContestSide {
+  roll: number;
+  statModifier: number;
+  total: number;
+}
+
+export interface Duel {
+  id: string;
+  attackerId: string;
+  defenderId: string;
+  districtId?: string | null;
+  wagerCredits: number;
+  attackerRoll: number;
+  attackerTotal: number;
+  defenderRoll: number;
+  defenderTotal: number;
+  winnerId: string;
+  creditsTransferred: number;
+  createdAt: string;
+  attacker?: { id: string; name: string; level: number };
+  defender?: { id: string; name: string; level: number };
+}
+
+export interface DuelResult {
+  duel: Duel;
+  result: {
+    attackerWins: boolean;
+    winnerName: string;
+    loserName: string;
+    creditsTransferred: number;
+    attacker: PvpContestSide;
+    defender: PvpContestSide;
+    attackerHeat: number;
+  };
+}
+
+export interface PlayerBounty {
+  id: string;
+  targetId: string;
+  postedById: string;
+  amount: number;
+  reason?: string | null;
+  status: 'OPEN' | 'CLAIMED' | 'CANCELLED';
+  claimedById?: string | null;
+  claimedAt?: string | null;
+  createdAt: string;
+  target?: {
+    id: string;
+    name: string;
+    level: number;
+    currentPlanet?: { id: string; name: string } | null;
+    currentDistrictId?: string | null;
+  };
+  postedBy?: { id: string; name: string };
+}
+
+export interface BountyClaimResult {
+  claimed: boolean;
+  amount: number;
+  contest: { attacker: PvpContestSide; defender: PvpContestSide; attackerWins: boolean };
+  targetName: string;
+}
+
+export interface LeaderboardRow {
+  rank: number;
+  characterId: string;
+  name: string;
+  level: number;
+  credits: number;
+  duelsWon: number;
+  duelsLost: number;
+  bountiesClaimed: number;
+}
 
 export interface ApiClientConfig {
   baseUrl?: string;
@@ -896,6 +1138,8 @@ export function createApiClient(config?: ApiClientConfig) {
     deleteOpportunity: (id: string) =>
       request<{ deleted: boolean; id: string }>(`/opportunities/${id}`, { method: 'DELETE' }),
     runSimulationTick: () => post<SimulationTickSummary>('/simulation/tick'),
+    replaySimulationTick: (tickId: string) =>
+      post<TickReplayResult>(`/simulation/replay/${tickId}`),
     getSolarSystems: () => request<SolarSystem[]>('/locations/solar-systems'),
     getPlanets: () => request<AdminPlanet[]>('/locations/planets'),
     getPlanet: (id: string) => request<AdminPlanet>(`/locations/planets/${id}`),
@@ -1013,10 +1257,28 @@ export function createApiClient(config?: ApiClientConfig) {
       id: string,
       body: { planetId?: string; districtId?: string; buildingId?: string },
     ) => post<TravelQuote>(`/characters/${id}/travel/quote`, body),
+    allocateStatPoints: (id: string, allocations: Record<string, number>) =>
+      post<Character>(`/characters/${id}/stats/allocate`, { allocations }),
     rest: (id: string) => post<unknown>(`/characters/${id}/rest`),
     stopRest: (id: string) => post<unknown>(`/characters/${id}/rest/stop`),
     useItem: (id: string, itemInstanceId: string) =>
       post<unknown>(`/characters/${id}/items/${itemInstanceId}/use`),
+    getCharacterHousing: (id: string) => request<HousingView>(`/characters/${id}/housing`),
+    rentHousing: (id: string) => post<CharacterHousing>(`/characters/${id}/housing/rent`),
+    cancelHousing: (id: string) =>
+      post<{ ended: boolean; itemsReturned: number }>(`/characters/${id}/housing/cancel`),
+    storeHousingItem: (id: string, itemInstanceId: string) =>
+      post<{ stored: boolean; itemName: string }>(
+        `/characters/${id}/housing/items/${itemInstanceId}/store`,
+      ),
+    retrieveHousingItem: (id: string, itemInstanceId: string) =>
+      post<{ retrieved: boolean; itemName: string }>(
+        `/characters/${id}/housing/items/${itemInstanceId}/retrieve`,
+      ),
+    equipItem: (id: string, itemInstanceId: string) =>
+      post<unknown>(`/characters/${id}/items/${itemInstanceId}/equip`),
+    unequipItem: (id: string, itemInstanceId: string) =>
+      post<unknown>(`/characters/${id}/items/${itemInstanceId}/unequip`),
     getActivity: (playerId: string, page = 1, limit = 30) =>
       request<{ logs: ActivityLog[]; total: number; page: number; limit: number }>(
         `/players/${playerId}/activity?page=${page}&limit=${limit}`,
@@ -1029,6 +1291,11 @@ export function createApiClient(config?: ApiClientConfig) {
       post<OpportunityInstance>(`/opportunities/${opportunityId}/accept`, { characterId }),
     resolveOpportunity: (instanceId: string) =>
       post<OpportunityInstance>(`/opportunities/instances/${instanceId}/resolve`),
+    decideOpportunity: (instanceId: string, minute: number, choiceId: string) =>
+      post<{ instance: OpportunityInstance; decision: OpportunityDecisionRecord }>(
+        `/opportunities/instances/${instanceId}/decide`,
+        { minute, choiceId },
+      ),
     getStockHoldings: (characterId: string) =>
       request<StockHolding[]>(`/stocks/holdings/${characterId}`),
     buyStock: (characterId: string, corporationId: string, shares: number) =>
@@ -1039,6 +1306,33 @@ export function createApiClient(config?: ApiClientConfig) {
       post<unknown>(`/shops/${buildingId}/buy`, { itemInstanceId, characterId }),
     shopSell: (buildingId: string, itemInstanceId: string, characterId: string) =>
       post<unknown>(`/shops/${buildingId}/sell`, { itemInstanceId, characterId }),
+    // retention
+    getDailyStatus: (playerId: string) => request<DailyStatus>(`/players/${playerId}/daily`),
+    claimDaily: (playerId: string) => post<DailyClaimResult>(`/players/${playerId}/daily/claim`),
+    getAchievements: (playerId: string) =>
+      request<AchievementView[]>(`/players/${playerId}/achievements`),
+    claimAchievement: (playerId: string, achievementId: string) =>
+      post<AchievementClaimResult>(`/players/${playerId}/achievements/${achievementId}/claim`),
+    // crafting
+    getCraftingRecipes: (characterId: string) =>
+      request<CraftingRecipesView>(`/crafting/recipes/${characterId}`),
+    craftRecipe: (characterId: string, recipeId: string) =>
+      post<CraftResult>('/crafting/craft', { characterId, recipeId }),
+    // pvp
+    getLeaderboard: () => request<LeaderboardRow[]>('/pvp/leaderboard'),
+    getNearbyPlayers: (characterId: string) =>
+      request<NearbyPlayer[]>(`/pvp/players/${characterId}`),
+    startDuel: (characterId: string, targetId: string, wager: number) =>
+      post<DuelResult>('/pvp/duel', { characterId, targetId, wager }),
+    getDuelHistory: (characterId: string, limit = 15) =>
+      request<Duel[]>(`/pvp/duels/${characterId}?limit=${limit}`),
+    getOpenBounties: () => request<PlayerBounty[]>('/pvp/bounties'),
+    postBounty: (characterId: string, targetId: string, amount: number, reason?: string) =>
+      post<PlayerBounty>('/pvp/bounties', { characterId, targetId, amount, reason }),
+    claimBounty: (bountyId: string, characterId: string) =>
+      post<BountyClaimResult>(`/pvp/bounties/${bountyId}/claim`, { characterId }),
+    cancelBounty: (bountyId: string, characterId: string) =>
+      post<PlayerBounty>(`/pvp/bounties/${bountyId}/cancel`, { characterId }),
     // jobs
     listJobs: (characterId: string) =>
       request<JobEmployment[]>(`/jobs/employments/${characterId}`),

@@ -31,6 +31,10 @@ function makePrismaMock() {
       update: jest.fn(),
       create: jest.fn(),
     },
+    itemInstance: {
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(),
+    },
     activityLog: {
       create: jest.fn(),
     },
@@ -226,6 +230,66 @@ describe('OpportunitiesService.acceptOpportunity', () => {
     ).rejects.toThrow(/hacking must be >= 8/);
   });
 
+  it('rejects accepting when the character lacks the energy for the work', async () => {
+    prisma.opportunityDefinition.findUnique.mockResolvedValue(baseDefinition);
+    prisma.character.findUnique.mockResolvedValue({ ...baseCharacter, energy: 3 });
+    prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    prisma.relationship.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.acceptOpportunity('opp-1', 'char-1', 'player-1'),
+    ).rejects.toThrow(/Too exhausted/);
+    expect(prisma.opportunityInstance.create).not.toHaveBeenCalled();
+    expect(prisma.character.update).not.toHaveBeenCalled();
+  });
+
+  it('deducts the energy cost when accepting', async () => {
+    prisma.opportunityDefinition.findUnique.mockResolvedValue(baseDefinition);
+    prisma.character.findUnique.mockResolvedValue(baseCharacter);
+    prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    prisma.relationship.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.create.mockResolvedValue({ id: 'inst-1', status: 'IN_PROGRESS' });
+
+    await service.acceptOpportunity('opp-1', 'char-1', 'player-1');
+
+    expect(prisma.character.update).toHaveBeenCalledWith({
+      where: { id: 'char-1' },
+      data: { energy: 95 },
+    });
+    const createCall = prisma.opportunityInstance.create.mock.calls[0][0];
+    expect(createCall.data.progress.energyCost).toBe(5);
+  });
+
+  it('honours ITEM_REQUIRED requirements against the character inventory', async () => {
+    const definition = {
+      ...baseDefinition,
+      requirements: [{ type: 'ITEM_REQUIRED', id: 'item-def-toolkit', name: 'Smuggler Toolkit' }],
+    };
+    prisma.opportunityDefinition.findUnique.mockResolvedValue(definition);
+    prisma.character.findUnique.mockResolvedValue(baseCharacter);
+    prisma.opportunityInstance.findFirst.mockResolvedValue(null);
+    prisma.relationship.findMany.mockResolvedValue([]);
+    prisma.opportunityInstance.findMany.mockResolvedValue([]);
+
+    prisma.itemInstance.findMany.mockResolvedValue([]);
+    await expect(
+      service.acceptOpportunity('opp-1', 'char-1', 'player-1'),
+    ).rejects.toThrow(/Smuggler Toolkit/);
+
+    prisma.itemInstance.findMany.mockResolvedValue([
+      {
+        id: 'inst-item-1',
+        itemDefinitionId: 'item-def-toolkit',
+        itemDefinition: { id: 'item-def-toolkit', name: 'Smuggler Toolkit', category: 'TOOL' },
+      },
+    ]);
+    prisma.opportunityInstance.create.mockResolvedValue({ id: 'inst-2', status: 'IN_PROGRESS' });
+    const result = await service.acceptOpportunity('opp-1', 'char-1', 'player-1');
+    expect(result).toMatchObject({ id: 'inst-2' });
+  });
+
   it('rejects locked follow-up quests until the prerequisite is completed', async () => {
     prisma.opportunityDefinition.findUnique.mockResolvedValue({
       ...baseDefinition,
@@ -282,7 +346,7 @@ describe('OpportunitiesService admin CRUD', () => {
       data: expect.objectContaining({
         title: 'Move boxes',
         kind: 'GIG',
-        difficulty: 1,
+        difficulty: 10,
         durationMinutes: 60,
       }),
     });
