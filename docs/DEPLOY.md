@@ -8,7 +8,7 @@ This deploys three apps to [Fly.io](https://fly.io) — the **API**, the **playe
 |---|---|---|---|
 | API (NestJS) | `heliora-monjar-api` | `https://heliora-monjar-api.fly.dev` | Always-on — runs the 30s world-tick scheduler |
 | Player web (Next.js) | `heliora-monjar-web` | `https://heliora-monjar-web.fly.dev` | Scales to zero when idle |
-| Admin (Next.js) | `heliora-monjar-admin` | `https://heliora-monjar-admin.fly.dev/admin` | Served under `/admin`; scales to zero |
+| Admin (Next.js) | `heliora-monjar-admin` | `https://heliora-monjar-admin.fly.dev` | Its own domain; scales to zero |
 | Database | Neon | — | Postgres 16, connection string as a secret |
 
 No Redis is needed — the tick scheduler runs in-process in the API, and the BullMQ worker isn't part of the API.
@@ -49,7 +49,7 @@ First run takes ~5–10 minutes (three Docker builds on Fly's remote builders). 
 ## After it's live
 
 - **Play:** open `https://heliora-monjar-web.fly.dev`. Log in as the seeded account **`test_player` / `Heliora123`**, or register a new operator.
-- **Admin:** `https://heliora-monjar-admin.fly.dev/admin`. To use the admin write features, paste your `ADMIN_TOKEN` into the token field at the top of any admin page (or make your player an admin in the database and sign in normally).
+- **Admin:** `https://heliora-monjar-admin.fly.dev`. To use the admin write features, paste your `ADMIN_TOKEN` into the token field at the top of any admin page (or make your player an admin in the database and sign in normally).
 - **API health / docs:** `https://heliora-monjar-api.fly.dev/health` and `.../api/docs` (Swagger).
 
 ## Redeploys
