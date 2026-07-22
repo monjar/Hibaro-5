@@ -59,16 +59,16 @@ jobs:
             --app "$FLY_API_APP" --stage
 
       - name: Deploy API
-        run: flyctl deploy . --config fly/api.toml --app "$FLY_API_APP" --remote-only
+        run: flyctl deploy . --config fly.api.toml --app "$FLY_API_APP" --remote-only
 
       - name: Deploy player web app
         run: >
-          flyctl deploy . --config fly/web.toml --app "$FLY_WEB_APP" --remote-only
+          flyctl deploy . --config fly.web.toml --app "$FLY_WEB_APP" --remote-only
           --build-arg NEXT_PUBLIC_API_URL="https://${FLY_API_APP}.fly.dev"
 
       - name: Deploy admin app
         run: >
-          flyctl deploy . --config fly/admin.toml --app "$FLY_ADMIN_APP" --remote-only
+          flyctl deploy . --config fly.admin.toml --app "$FLY_ADMIN_APP" --remote-only
           --build-arg NEXT_PUBLIC_API_URL="https://${FLY_API_APP}.fly.dev"
 
       - name: Summary

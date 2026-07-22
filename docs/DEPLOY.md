@@ -60,11 +60,11 @@ Every push to `master` re-runs the workflow and redeploys. Migrations apply auto
 
 Default sizing: one always-on API machine (`shared-cpu-1x`, 512 MB) plus two frontend machines that sleep when idle. That's roughly a **few dollars a month**, dominated by the always-on API. Neon's free tier covers a small database. To trim further you could lower the API to 256 MB, but 512 MB gives Prisma comfortable headroom.
 
-The API is deliberately always-on (`min_machines_running = 1`, `auto_stop_machines = false` in `fly/api.toml`) because the world-tick scheduler must keep running. Don't set it to scale to zero or the simulation pauses when idle.
+The API is deliberately always-on (`min_machines_running = 1`, `auto_stop_machines = false` in `fly.api.toml`) because the world-tick scheduler must keep running. Don't set it to scale to zero or the simulation pauses when idle.
 
 ## Changing app names or region
 
-The app names and org are the `env:` block in `.github/workflows/deploy.yml`; the region is `primary_region` in each `fly/*.toml` (default `lhr`, London — close to your Neon `eu-west-2` region). If a Fly app name is already taken globally, edit those names (keep them consistent across the workflow env and the three toml files) and re-run.
+The app names and org are the `env:` block in `.github/workflows/deploy.yml`; the region is `primary_region` in each `fly.*.toml` (default `lhr`, London — close to your Neon `eu-west-2` region). If a Fly app name is already taken globally, edit those names (keep them consistent across the workflow env and the three toml files) and re-run.
 
 ## Security notes
 
@@ -75,7 +75,7 @@ The app names and org are the `env:` block in `.github/workflows/deploy.yml`; th
 ## Files involved
 
 - `apps/{api,web,admin}/Dockerfile` — production images (monorepo-aware build).
-- `fly/{api,web,admin}.toml` — Fly service config (ports, always-on API, health check, release command).
+- `fly.{api,web,admin}.toml` — Fly service config (ports, always-on API, health check, release command).
 - `scripts/seed-if-empty.js` — seeds the world only when the DB is empty.
 - `.github/workflows/deploy.yml` — the browser-triggered deploy pipeline.
 - `.dockerignore` — keeps build contexts small.
