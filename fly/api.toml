@@ -1,0 +1,38 @@
+# Heliora API — always-on (it runs the in-process world-tick scheduler).
+# App name can be overridden with `flyctl deploy --app <name>`.
+app = "heliora-monjar-api"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+# Runs once per deploy, before the new version goes live. Applies pending
+# migrations and seeds the world the first time (no-op once populated).
+[deploy]
+  release_command = "sh -c 'npx prisma migrate deploy --schema=prisma/schema.prisma && node scripts/seed-if-empty.js'"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  SIMULATION_AUTO_TICK = "true"
+  SIMULATION_TICK_INTERVAL_MS = "30000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Always-on: the tick scheduler must keep running.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
